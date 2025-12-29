@@ -14,6 +14,17 @@ from gi.repository import GLib
 from .utils import check_freshclam_installed, get_freshclam_path
 
 
+def get_pkexec_path() -> Optional[str]:
+    """
+    Get the full path to the pkexec executable for privilege elevation.
+
+    Returns:
+        The full path to pkexec if found, None otherwise
+    """
+    import shutil
+    return shutil.which("pkexec")
+
+
 class UpdateStatus(Enum):
     """Status of a database update operation."""
     SUCCESS = "success"       # Database updated successfully (exit code 0)
@@ -182,13 +193,23 @@ class FreshclamUpdater:
 
     def _build_command(self) -> list[str]:
         """
-        Build the freshclam command arguments.
+        Build the freshclam command arguments with privilege elevation.
+
+        Uses pkexec for privilege elevation since freshclam requires
+        root access to update the ClamAV database in /var/lib/clamav/.
 
         Returns:
             List of command arguments
         """
         freshclam = get_freshclam_path() or "freshclam"
-        cmd = [freshclam]
+        pkexec = get_pkexec_path()
+
+        # Use pkexec for privilege elevation (required for database updates)
+        if pkexec:
+            cmd = [pkexec, freshclam]
+        else:
+            # Fallback to running without elevation (may fail with permission error)
+            cmd = [freshclam]
 
         # Add verbose flag for more detailed output
         cmd.append("--verbose")
@@ -247,7 +268,7 @@ class FreshclamUpdater:
         else:
             status = UpdateStatus.ERROR
             # Try to extract a meaningful error message
-            error_message = self._extract_error_message(stdout, stderr)
+            error_message = self._extract_error_message(stdout, stderr, exit_code)
 
         return UpdateResult(
             status=status,
@@ -258,19 +279,32 @@ class FreshclamUpdater:
             error_message=error_message
         )
 
-    def _extract_error_message(self, stdout: str, stderr: str) -> str:
+    def _extract_error_message(self, stdout: str, stderr: str, exit_code: int = 1) -> str:
         """
         Extract a meaningful error message from freshclam output.
 
         Args:
             stdout: Standard output from freshclam
             stderr: Standard error from freshclam
+            exit_code: Process exit code
 
         Returns:
             Extracted error message
         """
         # Check for common error patterns
         output = stdout + stderr
+
+        # Check for pkexec authentication errors
+        # Exit code 126 = pkexec: user dismissed auth dialog
+        # Exit code 127 = pkexec: not authorized
+        if exit_code == 126:
+            return "Authentication cancelled. Database update requires administrator privileges."
+        if exit_code == 127 and "pkexec" in output.lower():
+            return "Authorization failed. You are not authorized to update the database."
+
+        # Check for polkit/pkexec related errors
+        if "not authorized" in output.lower() or "authorization" in output.lower():
+            return "Authorization failed. Please try again and enter your password."
 
         # Check for lock file error (another freshclam running)
         if "locked" in output.lower() or "lock" in output.lower():
