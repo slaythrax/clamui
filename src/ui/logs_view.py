@@ -108,12 +108,7 @@ class LogsView(Gtk.Box):
 
         scrolled.set_child(self._logs_listbox)
 
-        # Wrap in a clamp for proper sizing
-        clamp = Adw.Clamp()
-        clamp.set_maximum_size(800)
-        clamp.set_child(scrolled)
-
-        logs_group.add(clamp)
+        logs_group.add(scrolled)
         self.append(logs_group)
 
     def _create_empty_state(self) -> Gtk.Widget:
@@ -180,12 +175,7 @@ class LogsView(Gtk.Box):
         scrolled.set_child(self._detail_text)
         detail_box.append(scrolled)
 
-        # Wrap in a clamp for proper sizing
-        clamp = Adw.Clamp()
-        clamp.set_maximum_size(800)
-        clamp.set_child(detail_box)
-
-        detail_group.add(clamp)
+        detail_group.add(detail_box)
         self.append(detail_group)
 
     def _create_daemon_logs_section(self):
@@ -213,13 +203,11 @@ class LogsView(Gtk.Box):
         daemon_group.add(self._daemon_status_row)
 
         # Daemon log text view in a scrolled window
-        daemon_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        daemon_box.set_spacing(12)
-
         scrolled = Gtk.ScrolledWindow()
         scrolled.set_min_content_height(150)
         scrolled.set_vexpand(True)
         scrolled.add_css_class("card")
+        scrolled.set_margin_top(12)
 
         self._daemon_text = Gtk.TextView()
         self._daemon_text.set_editable(False)
@@ -236,14 +224,8 @@ class LogsView(Gtk.Box):
         buffer.set_text("Daemon logs will appear here.\n\nClick the play button to start live updates.")
 
         scrolled.set_child(self._daemon_text)
-        daemon_box.append(scrolled)
 
-        # Wrap in a clamp for proper sizing
-        clamp = Adw.Clamp()
-        clamp.set_maximum_size(800)
-        clamp.set_child(daemon_box)
-
-        daemon_group.add(clamp)
+        daemon_group.add(scrolled)
         self.append(daemon_group)
 
         # Check daemon status on load
