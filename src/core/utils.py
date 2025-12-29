@@ -1,0 +1,189 @@
+# ClamUI Utility Functions
+"""
+Utility functions for ClamUI including ClamAV detection and path validation.
+"""
+
+import os
+import shutil
+import subprocess
+from pathlib import Path
+from typing import Tuple, Optional
+
+
+def check_clamav_installed() -> Tuple[bool, Optional[str]]:
+    """
+    Check if ClamAV (clamscan) is installed and accessible.
+
+    Returns:
+        Tuple of (is_installed, version_or_error):
+        - (True, version_string) if ClamAV is installed
+        - (False, error_message) if ClamAV is not found or inaccessible
+    """
+    # First check if clamscan exists in PATH
+    clamscan_path = shutil.which("clamscan")
+
+    if clamscan_path is None:
+        return (False, "ClamAV is not installed. Please install it with: sudo apt install clamav")
+
+    # Try to get version to verify it's working
+    try:
+        result = subprocess.run(
+            ["clamscan", "--version"],
+            capture_output=True,
+            text=True,
+            timeout=10
+        )
+
+        if result.returncode == 0:
+            version = result.stdout.strip()
+            return (True, version)
+        else:
+            return (False, f"ClamAV found but returned error: {result.stderr.strip()}")
+
+    except subprocess.TimeoutExpired:
+        return (False, "ClamAV check timed out")
+    except FileNotFoundError:
+        return (False, "ClamAV executable not found")
+    except PermissionError:
+        return (False, "Permission denied when accessing ClamAV")
+    except Exception as e:
+        return (False, f"Error checking ClamAV: {str(e)}")
+
+
+def validate_path(path: str) -> Tuple[bool, Optional[str]]:
+    """
+    Validate a path for scanning.
+
+    Checks that the path:
+    - Is not empty
+    - Exists on the filesystem
+    - Is readable by the current user
+
+    Args:
+        path: The filesystem path to validate
+
+    Returns:
+        Tuple of (is_valid, error_message):
+        - (True, None) if path is valid for scanning
+        - (False, error_message) if path is invalid
+    """
+    # Check for empty path
+    if not path or not path.strip():
+        return (False, "No path specified")
+
+    # Normalize and resolve the path
+    try:
+        resolved_path = Path(path).resolve()
+    except (OSError, RuntimeError) as e:
+        return (False, f"Invalid path format: {str(e)}")
+
+    # Check if path exists
+    if not resolved_path.exists():
+        return (False, f"Path does not exist: {path}")
+
+    # Check if path is readable
+    if not os.access(resolved_path, os.R_OK):
+        return (False, f"Permission denied: Cannot read {path}")
+
+    # For directories, check if we can list contents
+    if resolved_path.is_dir():
+        try:
+            # Try to list directory contents to verify access
+            next(resolved_path.iterdir(), None)
+        except PermissionError:
+            return (False, f"Permission denied: Cannot access directory contents of {path}")
+        except OSError as e:
+            return (False, f"Error accessing directory: {str(e)}")
+
+    return (True, None)
+
+
+def get_clamav_path() -> Optional[str]:
+    """
+    Get the full path to the clamscan executable.
+
+    Returns:
+        The full path to clamscan if found, None otherwise
+    """
+    return shutil.which("clamscan")
+
+
+def format_scan_path(path: str) -> str:
+    """
+    Format a path for display in the UI.
+
+    Shortens long paths for better readability while keeping them identifiable.
+
+    Args:
+        path: The filesystem path to format
+
+    Returns:
+        A formatted string suitable for UI display
+    """
+    if not path:
+        return "No path selected"
+
+    try:
+        resolved = Path(path).resolve()
+
+        # For home directory paths, use ~ notation
+        try:
+            home = Path.home()
+            if resolved.is_relative_to(home):
+                return "~/" + str(resolved.relative_to(home))
+        except (ValueError, RuntimeError):
+            pass
+
+        return str(resolved)
+    except (OSError, RuntimeError):
+        return path
+
+
+def get_path_info(path: str) -> dict:
+    """
+    Get information about a path for scanning.
+
+    Args:
+        path: The filesystem path to analyze
+
+    Returns:
+        Dictionary with path information:
+        - 'type': 'file', 'directory', or 'unknown'
+        - 'exists': boolean
+        - 'readable': boolean
+        - 'size': size in bytes (for files) or None
+        - 'display_path': formatted path for display
+    """
+    info = {
+        'type': 'unknown',
+        'exists': False,
+        'readable': False,
+        'size': None,
+        'display_path': format_scan_path(path)
+    }
+
+    if not path:
+        return info
+
+    try:
+        resolved = Path(path).resolve()
+        info['exists'] = resolved.exists()
+
+        if not info['exists']:
+            return info
+
+        if resolved.is_file():
+            info['type'] = 'file'
+            try:
+                info['size'] = resolved.stat().st_size
+            except OSError:
+                pass
+        elif resolved.is_dir():
+            info['type'] = 'directory'
+
+        info['readable'] = os.access(resolved, os.R_OK)
+
+    except (OSError, RuntimeError):
+        pass
+
+    return info
