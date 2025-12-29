@@ -105,6 +105,13 @@ class MainWindow(Adw.ApplicationWindow):
         self._database_button.set_action_name("app.show-update")
         nav_box.append(self._database_button)
 
+        # Logs button
+        self._logs_button = Gtk.ToggleButton()
+        self._logs_button.set_icon_name("document-open-recent-symbolic")
+        self._logs_button.set_tooltip_text("View Logs")
+        self._logs_button.set_action_name("app.show-logs")
+        nav_box.append(self._logs_button)
+
         return nav_box
 
     def set_active_view(self, view_name: str):
@@ -112,14 +119,20 @@ class MainWindow(Adw.ApplicationWindow):
         Update the navigation button states based on the active view.
 
         Args:
-            view_name: The name of the active view ('scan' or 'update')
+            view_name: The name of the active view ('scan', 'update', or 'logs')
         """
         if view_name == "scan":
             self._scan_button.set_active(True)
             self._database_button.set_active(False)
+            self._logs_button.set_active(False)
         elif view_name == "update":
             self._scan_button.set_active(False)
             self._database_button.set_active(True)
+            self._logs_button.set_active(False)
+        elif view_name == "logs":
+            self._scan_button.set_active(False)
+            self._database_button.set_active(False)
+            self._logs_button.set_active(True)
 
     def _create_menu_button(self) -> Gtk.MenuButton:
         """
