@@ -158,12 +158,7 @@ class UpdateView(Gtk.Box):
         scrolled.set_child(self._results_text)
         results_box.append(scrolled)
 
-        # Wrap in a clamp for proper sizing
-        clamp = Adw.Clamp()
-        clamp.set_maximum_size(800)
-        clamp.set_child(results_box)
-
-        results_group.add(clamp)
+        results_group.add(results_box)
         self.append(results_group)
 
     def _create_status_bar(self):

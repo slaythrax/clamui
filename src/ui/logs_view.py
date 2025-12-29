@@ -108,12 +108,7 @@ class LogsView(Gtk.Box):
 
         scrolled.set_child(self._logs_listbox)
 
-        # Wrap in a clamp for proper sizing
-        clamp = Adw.Clamp()
-        clamp.set_maximum_size(800)
-        clamp.set_child(scrolled)
-
-        logs_group.add(clamp)
+        logs_group.add(scrolled)
         self.append(logs_group)
 
     def _create_empty_state(self) -> Gtk.Widget:
@@ -180,12 +175,7 @@ class LogsView(Gtk.Box):
         scrolled.set_child(self._detail_text)
         detail_box.append(scrolled)
 
-        # Wrap in a clamp for proper sizing
-        clamp = Adw.Clamp()
-        clamp.set_maximum_size(800)
-        clamp.set_child(detail_box)
-
-        detail_group.add(clamp)
+        detail_group.add(detail_box)
         self.append(detail_group)
 
     def _create_daemon_logs_section(self):
@@ -238,12 +228,7 @@ class LogsView(Gtk.Box):
         scrolled.set_child(self._daemon_text)
         daemon_box.append(scrolled)
 
-        # Wrap in a clamp for proper sizing
-        clamp = Adw.Clamp()
-        clamp.set_maximum_size(800)
-        clamp.set_child(daemon_box)
-
-        daemon_group.add(clamp)
+        daemon_group.add(daemon_box)
         self.append(daemon_group)
 
         # Check daemon status on load
