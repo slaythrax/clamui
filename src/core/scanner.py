@@ -5,6 +5,7 @@ Scanner module for ClamUI providing ClamAV subprocess execution and async scanni
 
 import subprocess
 import threading
+import time
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
@@ -12,6 +13,7 @@ from typing import Callable, Optional
 
 from gi.repository import GLib
 
+from .log_manager import LogEntry, LogManager
 from .utils import check_clamav_installed, validate_path, get_clamav_path
 
 
@@ -56,10 +58,17 @@ class Scanner:
     while safely updating the UI via GLib.idle_add.
     """
 
-    def __init__(self):
-        """Initialize the scanner."""
+    def __init__(self, log_manager: Optional[LogManager] = None):
+        """
+        Initialize the scanner.
+
+        Args:
+            log_manager: Optional LogManager instance for saving scan logs.
+                         If not provided, a default instance is created.
+        """
         self._current_process: Optional[subprocess.Popen] = None
         self._scan_cancelled = False
+        self._log_manager = log_manager if log_manager else LogManager()
 
     def check_available(self) -> tuple[bool, Optional[str]]:
         """
@@ -84,10 +93,12 @@ class Scanner:
         Returns:
             ScanResult with scan details
         """
+        start_time = time.monotonic()
+
         # Validate the path first
         is_valid, error = validate_path(path)
         if not is_valid:
-            return ScanResult(
+            result = ScanResult(
                 status=ScanStatus.ERROR,
                 path=path,
                 stdout="",
@@ -99,11 +110,14 @@ class Scanner:
                 infected_count=0,
                 error_message=error
             )
+            duration = time.monotonic() - start_time
+            self._save_scan_log(result, duration)
+            return result
 
         # Check ClamAV is available
         is_installed, version_or_error = check_clamav_installed()
         if not is_installed:
-            return ScanResult(
+            result = ScanResult(
                 status=ScanStatus.ERROR,
                 path=path,
                 stdout="",
@@ -115,6 +129,9 @@ class Scanner:
                 infected_count=0,
                 error_message=version_or_error
             )
+            duration = time.monotonic() - start_time
+            self._save_scan_log(result, duration)
+            return result
 
         # Build clamscan command
         cmd = self._build_command(path, recursive)
@@ -134,7 +151,7 @@ class Scanner:
 
             # Check if cancelled during execution
             if self._scan_cancelled:
-                return ScanResult(
+                result = ScanResult(
                     status=ScanStatus.CANCELLED,
                     path=path,
                     stdout=stdout,
@@ -146,12 +163,18 @@ class Scanner:
                     infected_count=0,
                     error_message="Scan cancelled by user"
                 )
+                duration = time.monotonic() - start_time
+                self._save_scan_log(result, duration)
+                return result
 
             # Parse the results
-            return self._parse_results(path, stdout, stderr, exit_code)
+            result = self._parse_results(path, stdout, stderr, exit_code)
+            duration = time.monotonic() - start_time
+            self._save_scan_log(result, duration)
+            return result
 
         except FileNotFoundError:
-            return ScanResult(
+            result = ScanResult(
                 status=ScanStatus.ERROR,
                 path=path,
                 stdout="",
@@ -163,8 +186,11 @@ class Scanner:
                 infected_count=0,
                 error_message="ClamAV executable not found"
             )
+            duration = time.monotonic() - start_time
+            self._save_scan_log(result, duration)
+            return result
         except PermissionError as e:
-            return ScanResult(
+            result = ScanResult(
                 status=ScanStatus.ERROR,
                 path=path,
                 stdout="",
@@ -176,8 +202,11 @@ class Scanner:
                 infected_count=0,
                 error_message=f"Permission denied: {e}"
             )
+            duration = time.monotonic() - start_time
+            self._save_scan_log(result, duration)
+            return result
         except Exception as e:
-            return ScanResult(
+            result = ScanResult(
                 status=ScanStatus.ERROR,
                 path=path,
                 stdout="",
@@ -189,6 +218,9 @@ class Scanner:
                 infected_count=0,
                 error_message=f"Scan failed: {e}"
             )
+            duration = time.monotonic() - start_time
+            self._save_scan_log(result, duration)
+            return result
 
     def scan_async(
         self,
@@ -335,3 +367,41 @@ class Scanner:
             infected_count=infected_count,
             error_message=error_message
         )
+
+    def _save_scan_log(self, result: ScanResult, duration: float) -> None:
+        """
+        Save a scan result to the log manager.
+
+        Args:
+            result: The ScanResult to log
+            duration: Duration of the scan in seconds
+        """
+        # Build summary based on scan result
+        if result.status == ScanStatus.CLEAN:
+            summary = f"Scan completed - No threats found in {result.path}"
+        elif result.status == ScanStatus.INFECTED:
+            summary = f"Scan completed - {result.infected_count} threat(s) found in {result.path}"
+        elif result.status == ScanStatus.CANCELLED:
+            summary = f"Scan cancelled for {result.path}"
+        else:
+            summary = f"Scan failed for {result.path}: {result.error_message or 'Unknown error'}"
+
+        # Build details combining stdout and stderr
+        details_parts = []
+        if result.stdout:
+            details_parts.append(result.stdout)
+        if result.stderr:
+            details_parts.append(f"--- Errors ---\n{result.stderr}")
+        details = "\n".join(details_parts) if details_parts else "(No output)"
+
+        # Create and save log entry
+        log_entry = LogEntry.create(
+            log_type="scan",
+            status=result.status.value,
+            summary=summary,
+            details=details,
+            path=result.path,
+            duration=duration
+        )
+
+        self._log_manager.save_log(log_entry)

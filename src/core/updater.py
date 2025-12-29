@@ -5,12 +5,14 @@ Updater module for ClamUI providing freshclam subprocess execution and async dat
 
 import subprocess
 import threading
+import time
 from dataclasses import dataclass
 from enum import Enum
 from typing import Callable, Optional
 
 from gi.repository import GLib
 
+from .log_manager import LogEntry, LogManager
 from .utils import check_freshclam_installed, get_freshclam_path
 
 
@@ -62,10 +64,17 @@ class FreshclamUpdater:
     while safely updating the UI via GLib.idle_add.
     """
 
-    def __init__(self):
-        """Initialize the updater."""
+    def __init__(self, log_manager: Optional[LogManager] = None):
+        """
+        Initialize the updater.
+
+        Args:
+            log_manager: Optional LogManager instance for saving update logs.
+                         If not provided, a default instance is created.
+        """
         self._current_process: Optional[subprocess.Popen] = None
         self._update_cancelled = False
+        self._log_manager = log_manager if log_manager else LogManager()
 
     def check_available(self) -> tuple[bool, Optional[str]]:
         """
@@ -86,10 +95,12 @@ class FreshclamUpdater:
         Returns:
             UpdateResult with update details
         """
+        start_time = time.monotonic()
+
         # Check freshclam is available
         is_installed, version_or_error = check_freshclam_installed()
         if not is_installed:
-            return UpdateResult(
+            result = UpdateResult(
                 status=UpdateStatus.ERROR,
                 stdout="",
                 stderr=version_or_error or "freshclam not installed",
@@ -97,6 +108,9 @@ class FreshclamUpdater:
                 databases_updated=0,
                 error_message=version_or_error
             )
+            duration = time.monotonic() - start_time
+            self._save_update_log(result, duration)
+            return result
 
         # Build freshclam command
         cmd = self._build_command()
@@ -116,7 +130,7 @@ class FreshclamUpdater:
 
             # Check if cancelled during execution
             if self._update_cancelled:
-                return UpdateResult(
+                result = UpdateResult(
                     status=UpdateStatus.CANCELLED,
                     stdout=stdout,
                     stderr=stderr,
@@ -124,12 +138,18 @@ class FreshclamUpdater:
                     databases_updated=0,
                     error_message="Update cancelled by user"
                 )
+                duration = time.monotonic() - start_time
+                self._save_update_log(result, duration)
+                return result
 
             # Parse the results
-            return self._parse_results(stdout, stderr, exit_code)
+            result = self._parse_results(stdout, stderr, exit_code)
+            duration = time.monotonic() - start_time
+            self._save_update_log(result, duration)
+            return result
 
         except FileNotFoundError:
-            return UpdateResult(
+            result = UpdateResult(
                 status=UpdateStatus.ERROR,
                 stdout="",
                 stderr="freshclam executable not found",
@@ -137,8 +157,11 @@ class FreshclamUpdater:
                 databases_updated=0,
                 error_message="freshclam executable not found"
             )
+            duration = time.monotonic() - start_time
+            self._save_update_log(result, duration)
+            return result
         except PermissionError as e:
-            return UpdateResult(
+            result = UpdateResult(
                 status=UpdateStatus.ERROR,
                 stdout="",
                 stderr=str(e),
@@ -146,8 +169,11 @@ class FreshclamUpdater:
                 databases_updated=0,
                 error_message=f"Permission denied: {e}"
             )
+            duration = time.monotonic() - start_time
+            self._save_update_log(result, duration)
+            return result
         except Exception as e:
-            return UpdateResult(
+            result = UpdateResult(
                 status=UpdateStatus.ERROR,
                 stdout="",
                 stderr=str(e),
@@ -155,6 +181,9 @@ class FreshclamUpdater:
                 databases_updated=0,
                 error_message=f"Update failed: {e}"
             )
+            duration = time.monotonic() - start_time
+            self._save_update_log(result, duration)
+            return result
 
     def update_async(
         self,
@@ -327,3 +356,41 @@ class FreshclamUpdater:
             return stderr.strip()
 
         return "Update failed with an unknown error"
+
+    def _save_update_log(self, result: UpdateResult, duration: float) -> None:
+        """
+        Save an update result to the log manager.
+
+        Args:
+            result: The UpdateResult to log
+            duration: Duration of the update in seconds
+        """
+        # Build summary based on update result
+        if result.status == UpdateStatus.SUCCESS:
+            summary = f"Database update completed - {result.databases_updated} database(s) updated"
+        elif result.status == UpdateStatus.UP_TO_DATE:
+            summary = "Database update completed - Already up to date"
+        elif result.status == UpdateStatus.CANCELLED:
+            summary = "Database update cancelled"
+        else:
+            summary = f"Database update failed: {result.error_message or 'Unknown error'}"
+
+        # Build details combining stdout and stderr
+        details_parts = []
+        if result.stdout:
+            details_parts.append(result.stdout)
+        if result.stderr:
+            details_parts.append(f"--- Errors ---\n{result.stderr}")
+        details = "\n".join(details_parts) if details_parts else "(No output)"
+
+        # Create and save log entry
+        log_entry = LogEntry.create(
+            log_type="update",
+            status=result.status.value,
+            summary=summary,
+            details=details,
+            path=None,  # Updates don't have a path
+            duration=duration
+        )
+
+        self._log_manager.save_log(log_entry)
