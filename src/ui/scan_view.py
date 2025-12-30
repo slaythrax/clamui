@@ -1014,9 +1014,107 @@ class ScanView(Gtk.Box):
         self._status_banner.set_revealed(True)
 
     def _on_export_text_clicked(self, button):
-        """Handle export to text file button click."""
-        # Placeholder - will be implemented in subtask-5-3
-        pass
+        """
+        Handle export to text file button click.
+
+        Opens a file save dialog to let the user choose a location,
+        then writes the formatted scan results to a text file.
+        """
+        if self._current_result is None:
+            self._status_banner.set_title("No results to export")
+            self._status_banner.add_css_class("warning")
+            self._status_banner.remove_css_class("success")
+            self._status_banner.remove_css_class("error")
+            self._status_banner.set_button_label(None)
+            self._status_banner.set_revealed(True)
+            return
+
+        # Create save dialog
+        dialog = Gtk.FileDialog()
+        dialog.set_title("Export Scan Results")
+
+        # Generate default filename with timestamp
+        from datetime import datetime
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        dialog.set_initial_name(f"clamui_scan_{timestamp}.txt")
+
+        # Set up file filter for text files
+        text_filter = Gtk.FileFilter()
+        text_filter.set_name("Text Files")
+        text_filter.add_mime_type("text/plain")
+        text_filter.add_pattern("*.txt")
+
+        filters = Gio.ListStore.new(Gtk.FileFilter)
+        filters.append(text_filter)
+        dialog.set_filters(filters)
+        dialog.set_default_filter(text_filter)
+
+        # Get the parent window
+        window = self.get_root()
+
+        # Open save dialog
+        dialog.save(window, None, self._on_text_export_file_selected)
+
+    def _on_text_export_file_selected(self, dialog, result):
+        """
+        Handle text export file selection result.
+
+        Writes the formatted scan results to the selected file.
+
+        Args:
+            dialog: The FileDialog that was used
+            result: The async result from the save dialog
+        """
+        try:
+            file = dialog.save_finish(result)
+            if file is None:
+                return  # User cancelled
+
+            file_path = file.get_path()
+            if file_path is None:
+                self._show_export_error("Invalid file path selected")
+                return
+
+            # Ensure .txt extension
+            if not file_path.endswith('.txt'):
+                file_path += '.txt'
+
+            # Format the results as text
+            formatted_text = format_results_as_text(self._current_result)
+
+            # Write to file
+            with open(file_path, 'w', encoding='utf-8') as f:
+                f.write(formatted_text)
+
+            # Show success feedback
+            self._status_banner.set_title(f"Results exported to {os.path.basename(file_path)}")
+            self._status_banner.add_css_class("success")
+            self._status_banner.remove_css_class("error")
+            self._status_banner.remove_css_class("warning")
+            self._status_banner.set_button_label(None)
+            self._status_banner.set_revealed(True)
+
+        except GLib.Error:
+            # User cancelled the dialog
+            pass
+        except PermissionError:
+            self._show_export_error("Permission denied - cannot write to selected location")
+        except OSError as e:
+            self._show_export_error(f"Error writing file: {str(e)}")
+
+    def _show_export_error(self, message: str):
+        """
+        Display an error message for export failures.
+
+        Args:
+            message: The error message to display
+        """
+        self._status_banner.set_title(message)
+        self._status_banner.add_css_class("error")
+        self._status_banner.remove_css_class("success")
+        self._status_banner.remove_css_class("warning")
+        self._status_banner.set_button_label(None)
+        self._status_banner.set_revealed(True)
 
     def _on_export_csv_clicked(self, button):
         """Handle export to CSV file button click."""
