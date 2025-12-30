@@ -38,22 +38,10 @@ def _setup_path():
 # Set up path before importing application modules
 _setup_path()
 
-# IMPORTANT: Import tray_indicator BEFORE any GTK4 imports to allow GTK3 loading
-# This must happen before importing ClamUIApp which triggers GTK4 initialization
-# We use importlib to avoid triggering src.ui.__init__.py which imports GTK4 modules
-try:
-    import importlib.util
-    spec = importlib.util.spec_from_file_location(
-        "tray_indicator",
-        os.path.join(os.path.dirname(__file__), "ui", "tray_indicator.py")
-    )
-    tray_indicator = importlib.util.module_from_spec(spec)
-    sys.modules["src.ui.tray_indicator"] = tray_indicator
-    spec.loader.exec_module(tray_indicator)
-    _TRAY_PRELOADED = tray_indicator.is_available()
-except Exception as e:
-    _TRAY_PRELOADED = False
-
+# Import the application class
+# Note: Tray indicator is handled by app.py with graceful degradation
+# GTK3/GTK4 cannot coexist in the same process, so tray is disabled
+# when running with GTK4 (which is required for the main UI)
 from src.app import ClamUIApp
 
 
