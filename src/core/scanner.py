@@ -47,6 +47,7 @@ class ScanResult:
     scanned_dirs: int
     infected_count: int
     error_message: Optional[str]
+    threat_details: list[ThreatDetail]
 
     @property
     def is_clean(self) -> bool:
@@ -117,7 +118,8 @@ class Scanner:
                 scanned_files=0,
                 scanned_dirs=0,
                 infected_count=0,
-                error_message=error
+                error_message=error,
+                threat_details=[]
             )
             duration = time.monotonic() - start_time
             self._save_scan_log(result, duration)
@@ -136,7 +138,8 @@ class Scanner:
                 scanned_files=0,
                 scanned_dirs=0,
                 infected_count=0,
-                error_message=version_or_error
+                error_message=version_or_error,
+                threat_details=[]
             )
             duration = time.monotonic() - start_time
             self._save_scan_log(result, duration)
@@ -170,7 +173,8 @@ class Scanner:
                     scanned_files=0,
                     scanned_dirs=0,
                     infected_count=0,
-                    error_message="Scan cancelled by user"
+                    error_message="Scan cancelled by user",
+                    threat_details=[]
                 )
                 duration = time.monotonic() - start_time
                 self._save_scan_log(result, duration)
@@ -193,7 +197,8 @@ class Scanner:
                 scanned_files=0,
                 scanned_dirs=0,
                 infected_count=0,
-                error_message="ClamAV executable not found"
+                error_message="ClamAV executable not found",
+                threat_details=[]
             )
             duration = time.monotonic() - start_time
             self._save_scan_log(result, duration)
@@ -209,7 +214,8 @@ class Scanner:
                 scanned_files=0,
                 scanned_dirs=0,
                 infected_count=0,
-                error_message=f"Permission denied: {e}"
+                error_message=f"Permission denied: {e}",
+                threat_details=[]
             )
             duration = time.monotonic() - start_time
             self._save_scan_log(result, duration)
@@ -225,7 +231,8 @@ class Scanner:
                 scanned_files=0,
                 scanned_dirs=0,
                 infected_count=0,
-                error_message=f"Scan failed: {e}"
+                error_message=f"Scan failed: {e}",
+                threat_details=[]
             )
             duration = time.monotonic() - start_time
             self._save_scan_log(result, duration)
@@ -378,7 +385,8 @@ class Scanner:
             scanned_files=scanned_files,
             scanned_dirs=scanned_dirs,
             infected_count=infected_count,
-            error_message=error_message
+            error_message=error_message,
+            threat_details=[]
         )
 
     def _save_scan_log(self, result: ScanResult, duration: float) -> None:
