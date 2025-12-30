@@ -67,6 +67,9 @@ class ClamUIApp(Adw.Application):
         # Tray indicator (initialized in do_startup if available)
         self._tray_indicator = None
 
+        # Track first activation for start-minimized functionality
+        self._first_activation = True
+
     @property
     def app_name(self) -> str:
         """Get the application name."""
@@ -98,9 +101,14 @@ class ClamUIApp(Adw.Application):
 
         This method is called when the application is activated (launched).
         It creates and presents the main window with the scan interface.
+
+        If start_minimized is enabled and tray indicator is available,
+        the window is created but not presented on first activation,
+        allowing the app to run in the tray without showing a window.
         """
         # Get existing window or create new one
         win = self.props.active_window
+        is_new_window = win is None
 
         if not win:
             # Create the main window
@@ -120,7 +128,23 @@ class ClamUIApp(Adw.Application):
             win.set_active_view("scan")
             self._current_view = "scan"
 
-        win.present()
+        # Check if we should start minimized (only on first activation)
+        start_minimized = (
+            self._first_activation
+            and is_new_window
+            and self._settings_manager.get("start_minimized", False)
+            and self._tray_indicator is not None
+        )
+
+        if start_minimized:
+            # First activation with start_minimized enabled - don't show window
+            # The tray indicator is already active from do_startup
+            logger.info("Starting minimized to system tray")
+        else:
+            win.present()
+
+        # Mark first activation as complete
+        self._first_activation = False
 
     def do_startup(self):
         """
