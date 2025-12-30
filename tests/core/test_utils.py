@@ -15,9 +15,11 @@ sys.modules["gi"] = mock.MagicMock()
 sys.modules["gi.repository"] = mock.MagicMock()
 
 from src.core.utils import (
+    ThreatSeverity,
     check_clamav_installed,
     check_clamdscan_installed,
     check_freshclam_installed,
+    classify_threat_severity,
     format_scan_path,
     get_clamav_path,
     get_freshclam_path,
@@ -407,3 +409,148 @@ class TestValidateDroppedFiles:
         finally:
             # Restore permissions for cleanup
             test_dir.chmod(original_mode)
+
+
+class TestClassifyThreatSeverity:
+    """Tests for the classify_threat_severity function."""
+
+    def test_classify_threat_severity_critical_ransomware(self):
+        """Test CRITICAL severity for ransomware threats."""
+        assert classify_threat_severity("Win.Ransomware.Locky") == ThreatSeverity.CRITICAL
+        assert classify_threat_severity("Ransom.WannaCry") == ThreatSeverity.CRITICAL
+        assert classify_threat_severity("Win.Ransom.Cerber") == ThreatSeverity.CRITICAL
+
+    def test_classify_threat_severity_critical_rootkit(self):
+        """Test CRITICAL severity for rootkit threats."""
+        assert classify_threat_severity("Win.Rootkit.Agent") == ThreatSeverity.CRITICAL
+        assert classify_threat_severity("Unix.Rootkit.Kaiten") == ThreatSeverity.CRITICAL
+
+    def test_classify_threat_severity_critical_bootkit(self):
+        """Test CRITICAL severity for bootkit threats."""
+        assert classify_threat_severity("Win.Bootkit.Rovnix") == ThreatSeverity.CRITICAL
+
+    def test_classify_threat_severity_critical_cryptolocker(self):
+        """Test CRITICAL severity for CryptoLocker variants."""
+        assert classify_threat_severity("Win.Trojan.CryptoLocker") == ThreatSeverity.CRITICAL
+
+    def test_classify_threat_severity_critical_wannacry(self):
+        """Test CRITICAL severity for WannaCry."""
+        assert classify_threat_severity("WannaCry.Ransomware") == ThreatSeverity.CRITICAL
+
+    def test_classify_threat_severity_high_trojan(self):
+        """Test HIGH severity for trojan threats."""
+        assert classify_threat_severity("Win.Trojan.Agent") == ThreatSeverity.HIGH
+        assert classify_threat_severity("Trojan.Generic") == ThreatSeverity.HIGH
+        assert classify_threat_severity("Win.Trojan.Downloader") == ThreatSeverity.HIGH
+
+    def test_classify_threat_severity_high_worm(self):
+        """Test HIGH severity for worm threats."""
+        assert classify_threat_severity("Win.Worm.Conficker") == ThreatSeverity.HIGH
+        assert classify_threat_severity("Worm.Blaster") == ThreatSeverity.HIGH
+
+    def test_classify_threat_severity_high_backdoor(self):
+        """Test HIGH severity for backdoor threats."""
+        assert classify_threat_severity("Win.Backdoor.Poison") == ThreatSeverity.HIGH
+        assert classify_threat_severity("Backdoor.Trojan") == ThreatSeverity.HIGH
+
+    def test_classify_threat_severity_high_exploit(self):
+        """Test HIGH severity for exploit threats."""
+        assert classify_threat_severity("Exploit.PDF.CVE-2023-1234") == ThreatSeverity.HIGH
+        assert classify_threat_severity("Win.Exploit.Agent") == ThreatSeverity.HIGH
+
+    def test_classify_threat_severity_high_downloader(self):
+        """Test HIGH severity for downloader threats."""
+        assert classify_threat_severity("Win.Downloader.Agent") == ThreatSeverity.HIGH
+
+    def test_classify_threat_severity_high_dropper(self):
+        """Test HIGH severity for dropper threats."""
+        assert classify_threat_severity("Win.Dropper.Agent") == ThreatSeverity.HIGH
+
+    def test_classify_threat_severity_high_keylogger(self):
+        """Test HIGH severity for keylogger threats."""
+        assert classify_threat_severity("Win.Keylogger.Agent") == ThreatSeverity.HIGH
+
+    def test_classify_threat_severity_medium_adware(self):
+        """Test MEDIUM severity for adware threats."""
+        assert classify_threat_severity("PUA.Win.Adware.Agent") == ThreatSeverity.MEDIUM
+        assert classify_threat_severity("Adware.Generic") == ThreatSeverity.MEDIUM
+
+    def test_classify_threat_severity_medium_pua(self):
+        """Test MEDIUM severity for PUA/PUP threats."""
+        assert classify_threat_severity("PUA.Win.Tool.Agent") == ThreatSeverity.MEDIUM
+        assert classify_threat_severity("PUP.Optional.Agent") == ThreatSeverity.MEDIUM
+
+    def test_classify_threat_severity_medium_spyware(self):
+        """Test MEDIUM severity for spyware threats."""
+        assert classify_threat_severity("Win.Spyware.Agent") == ThreatSeverity.MEDIUM
+
+    def test_classify_threat_severity_medium_miner(self):
+        """Test MEDIUM severity for crypto miner threats."""
+        assert classify_threat_severity("CoinMiner.Generic") == ThreatSeverity.MEDIUM
+        assert classify_threat_severity("Win.Miner.Agent") == ThreatSeverity.MEDIUM
+
+    def test_classify_threat_severity_low_eicar(self):
+        """Test LOW severity for EICAR test file."""
+        assert classify_threat_severity("Eicar-Test-Signature") == ThreatSeverity.LOW
+        assert classify_threat_severity("EICAR_Test") == ThreatSeverity.LOW
+
+    def test_classify_threat_severity_low_test_signature(self):
+        """Test LOW severity for test signatures."""
+        assert classify_threat_severity("Test-Signature") == ThreatSeverity.LOW
+        assert classify_threat_severity("ClamAV-Test-Signature") == ThreatSeverity.LOW
+
+    def test_classify_threat_severity_low_test_file(self):
+        """Test LOW severity for test files."""
+        assert classify_threat_severity("Test.File.Virus") == ThreatSeverity.LOW
+
+    def test_classify_threat_severity_low_heuristic(self):
+        """Test LOW severity for heuristic detections."""
+        assert classify_threat_severity("Heuristic.Suspicious") == ThreatSeverity.LOW
+        assert classify_threat_severity("Win.Heuristic.Agent") == ThreatSeverity.LOW
+
+    def test_classify_threat_severity_low_generic(self):
+        """Test LOW severity for generic detections."""
+        assert classify_threat_severity("Generic.Malware") == ThreatSeverity.LOW
+        assert classify_threat_severity("Win.Generic.Agent") == ThreatSeverity.LOW
+
+    def test_classify_threat_severity_default_unknown(self):
+        """Test default MEDIUM severity for unknown threats."""
+        assert classify_threat_severity("Unknown.Malware.Type") == ThreatSeverity.MEDIUM
+        assert classify_threat_severity("Win.Virus.Agent") == ThreatSeverity.MEDIUM
+        assert classify_threat_severity("Some.Random.Threat") == ThreatSeverity.MEDIUM
+
+    def test_classify_threat_severity_empty_string(self):
+        """Test MEDIUM severity for empty string."""
+        assert classify_threat_severity("") == ThreatSeverity.MEDIUM
+
+    def test_classify_threat_severity_none(self):
+        """Test MEDIUM severity for None input."""
+        assert classify_threat_severity(None) == ThreatSeverity.MEDIUM
+
+    def test_classify_threat_severity_case_insensitive(self):
+        """Test case-insensitive matching."""
+        assert classify_threat_severity("RANSOMWARE") == ThreatSeverity.CRITICAL
+        assert classify_threat_severity("Trojan") == ThreatSeverity.HIGH
+        assert classify_threat_severity("ADWARE") == ThreatSeverity.MEDIUM
+        assert classify_threat_severity("EICAR") == ThreatSeverity.LOW
+
+    def test_classify_threat_severity_priority_critical_over_high(self):
+        """Test that CRITICAL patterns take priority over HIGH patterns."""
+        # CryptoLocker contains "Trojan" which is HIGH, but CryptoLocker is CRITICAL
+        # Since we check critical first, this should be CRITICAL
+        assert classify_threat_severity("Win.Trojan.CryptoLocker") == ThreatSeverity.CRITICAL
+
+    def test_classify_threat_severity_real_world_threats(self):
+        """Test with real-world threat names from ClamAV."""
+        # Critical
+        assert classify_threat_severity("Win.Ransomware.WannaCry-9952423-0") == ThreatSeverity.CRITICAL
+
+        # High
+        assert classify_threat_severity("Win.Trojan.Emotet-9953123-0") == ThreatSeverity.HIGH
+        assert classify_threat_severity("Unix.Worm.Mirai-123456") == ThreatSeverity.HIGH
+
+        # Medium
+        assert classify_threat_severity("PUA.Win.Adware.OpenCandy-1234") == ThreatSeverity.MEDIUM
+
+        # Low
+        assert classify_threat_severity("Eicar-Test-Signature") == ThreatSeverity.LOW

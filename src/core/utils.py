@@ -373,6 +373,65 @@ def format_scan_path(path: str) -> str:
         return path
 
 
+def classify_threat_severity(threat_name: str) -> ThreatSeverity:
+    """
+    Classify the severity level of a threat based on its name.
+
+    ClamAV threat names typically follow patterns that indicate the threat type.
+    This function analyzes the threat name to determine the severity level.
+
+    Severity levels:
+    - CRITICAL: Ransomware, Rootkit, Bootkit (most dangerous, can cause data loss or system compromise)
+    - HIGH: Trojan, Worm, Backdoor, Exploit (serious threats requiring immediate attention)
+    - MEDIUM: Adware, PUA, Spyware (less severe but still concerning)
+    - LOW: Test signatures (EICAR), Generic/Heuristic detections
+
+    Args:
+        threat_name: The threat name from ClamAV output (e.g., "Win.Trojan.Agent")
+
+    Returns:
+        ThreatSeverity enum value
+
+    Example:
+        >>> classify_threat_severity("Win.Ransomware.Locky")
+        ThreatSeverity.CRITICAL
+
+        >>> classify_threat_severity("Eicar-Test-Signature")
+        ThreatSeverity.LOW
+    """
+    if not threat_name:
+        return ThreatSeverity.MEDIUM
+
+    name_lower = threat_name.lower()
+
+    # Critical: Most dangerous threats - ransomware, rootkits, bootkits
+    critical_patterns = ['ransom', 'rootkit', 'bootkit', 'cryptolocker', 'wannacry']
+    for pattern in critical_patterns:
+        if pattern in name_lower:
+            return ThreatSeverity.CRITICAL
+
+    # High: Serious threats requiring immediate attention
+    high_patterns = ['trojan', 'worm', 'backdoor', 'exploit', 'downloader', 'dropper', 'keylogger']
+    for pattern in high_patterns:
+        if pattern in name_lower:
+            return ThreatSeverity.HIGH
+
+    # Medium: Less severe but still concerning threats
+    medium_patterns = ['adware', 'pua', 'pup', 'spyware', 'miner', 'coinminer']
+    for pattern in medium_patterns:
+        if pattern in name_lower:
+            return ThreatSeverity.MEDIUM
+
+    # Low: Test files and generic/heuristic detections
+    low_patterns = ['eicar', 'test-signature', 'test.file', 'heuristic', 'generic']
+    for pattern in low_patterns:
+        if pattern in name_lower:
+            return ThreatSeverity.LOW
+
+    # Default to medium for unknown threats
+    return ThreatSeverity.MEDIUM
+
+
 def get_path_info(path: str) -> dict:
     """
     Get information about a path for scanning.
