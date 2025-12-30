@@ -130,6 +130,7 @@ class ScanView(Gtk.Box):
         # Extract files from Gdk.FileList
         files = value.get_files()
         if not files:
+            self._show_drop_error("No files were dropped")
             return False
 
         # Get paths from Gio.File objects (None for remote files)
@@ -143,7 +144,12 @@ class ScanView(Gtk.Box):
             self._set_selected_path(valid_paths[0])
             return True
 
-        # No valid paths - drop rejected
+        # No valid paths - show error and reject drop
+        if errors:
+            # Show the first error (most relevant for user)
+            self._show_drop_error(errors[0])
+        else:
+            self._show_drop_error("Unable to accept dropped files")
         return False
 
     def _on_drag_enter(self, target, x, y) -> Gdk.DragAction:
@@ -174,6 +180,24 @@ class ScanView(Gtk.Box):
             target: The DropTarget controller
         """
         self.remove_css_class('drop-active')
+
+    def _show_drop_error(self, message: str):
+        """
+        Display an error message for invalid file drops.
+
+        Uses the status banner to show a user-friendly error message
+        when dropped files cannot be accepted (remote files, permission
+        errors, non-existent paths, etc.).
+
+        Args:
+            message: The error message to display
+        """
+        self._status_banner.set_title(message)
+        self._status_banner.add_css_class("error")
+        self._status_banner.remove_css_class("success")
+        self._status_banner.remove_css_class("warning")
+        self._status_banner.set_button_label(None)
+        self._status_banner.set_revealed(True)
 
     def _create_selection_section(self):
         """Create the folder/file selection section."""
