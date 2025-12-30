@@ -9,7 +9,7 @@ import tempfile
 import gi
 gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
-from gi.repository import Gtk, Adw, Gio, GLib
+from gi.repository import Gtk, Adw, Gio, GLib, Gdk
 
 from ..core.scanner import Scanner, ScanResult, ScanStatus
 from ..core.utils import format_scan_path, check_clamav_installed
@@ -76,6 +76,33 @@ class ScanView(Gtk.Box):
 
         # Create the status bar
         self._create_status_bar()
+
+        # Set up drag-and-drop support
+        self._setup_drop_target()
+
+    def _setup_drop_target(self):
+        """Set up drag-and-drop file handling."""
+        drop_target = Gtk.DropTarget.new(Gdk.FileList, Gdk.DragAction.COPY)
+        drop_target.connect('drop', self._on_drop)
+        drop_target.connect('enter', self._on_drag_enter)
+        drop_target.connect('leave', self._on_drag_leave)
+        # Add drop target to the entire ScanView widget
+        self.add_controller(drop_target)
+
+    def _on_drop(self, target, value, x, y) -> bool:
+        """Handle file drop."""
+        # Placeholder - will be implemented in subtask-2-2
+        return False
+
+    def _on_drag_enter(self, target, x, y) -> Gdk.DragAction:
+        """Visual feedback when drag enters."""
+        # Placeholder - will be implemented in subtask-2-3
+        return Gdk.DragAction.COPY
+
+    def _on_drag_leave(self, target):
+        """Cleanup when drag leaves."""
+        # Placeholder - will be implemented in subtask-2-3
+        pass
 
     def _create_selection_section(self):
         """Create the folder/file selection section."""
