@@ -340,9 +340,37 @@ class ScanView(Gtk.Box):
         results_group.set_description("Results will appear here after scanning")
         self._results_group = results_group
 
-        # Header box with fullscreen button
+        # Header box with export and fullscreen buttons
         header_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
         header_box.set_halign(Gtk.Align.END)
+        header_box.set_spacing(6)
+
+        # Copy to Clipboard button
+        copy_button = Gtk.Button()
+        copy_button.set_icon_name("edit-copy-symbolic")
+        copy_button.set_tooltip_text("Copy to clipboard")
+        copy_button.add_css_class("flat")
+        copy_button.set_sensitive(False)  # Disabled until results available
+        copy_button.connect("clicked", self._on_copy_results_clicked)
+        self._copy_button = copy_button
+
+        # Export to Text button
+        export_text_button = Gtk.Button()
+        export_text_button.set_icon_name("document-save-symbolic")
+        export_text_button.set_tooltip_text("Export to text file")
+        export_text_button.add_css_class("flat")
+        export_text_button.set_sensitive(False)  # Disabled until results available
+        export_text_button.connect("clicked", self._on_export_text_clicked)
+        self._export_text_button = export_text_button
+
+        # Export to CSV button
+        export_csv_button = Gtk.Button()
+        export_csv_button.set_icon_name("x-office-spreadsheet-symbolic")
+        export_csv_button.set_tooltip_text("Export to CSV file")
+        export_csv_button.add_css_class("flat")
+        export_csv_button.set_sensitive(False)  # Disabled until results available
+        export_csv_button.connect("clicked", self._on_export_csv_clicked)
+        self._export_csv_button = export_csv_button
 
         # Fullscreen button
         fullscreen_button = Gtk.Button()
@@ -352,6 +380,9 @@ class ScanView(Gtk.Box):
         fullscreen_button.connect("clicked", self._on_fullscreen_results_clicked)
         self._fullscreen_button = fullscreen_button
 
+        header_box.append(copy_button)
+        header_box.append(export_text_button)
+        header_box.append(export_csv_button)
         header_box.append(fullscreen_button)
         results_group.set_header_suffix(header_box)
 
@@ -567,6 +598,11 @@ class ScanView(Gtk.Box):
             self._select_folder_btn.set_sensitive(False)
             self._select_file_btn.set_sensitive(False)
             self._test_clamav_button.set_sensitive(False)
+
+            # Disable export buttons during scan
+            self._copy_button.set_sensitive(False)
+            self._export_text_button.set_sensitive(False)
+            self._export_csv_button.set_sensitive(False)
         else:
             # Restore normal state
             self._scan_button.set_label("Scan")
@@ -608,6 +644,11 @@ class ScanView(Gtk.Box):
         # Clear raw output and current result
         self._raw_output = ""
         self._current_result = None
+
+        # Disable export buttons when no results
+        self._copy_button.set_sensitive(False)
+        self._export_text_button.set_sensitive(False)
+        self._export_csv_button.set_sensitive(False)
 
         self._status_banner.set_revealed(False)
 
@@ -687,6 +728,12 @@ class ScanView(Gtk.Box):
             self._results_placeholder.set_text(
                 f"Scan failed: {result.error_message}\n\nPlease check the fullscreen log for details."
             )
+
+        # Enable export buttons when results are available
+        # (for both successful scans and error states, so user can export error details)
+        self._copy_button.set_sensitive(True)
+        self._export_text_button.set_sensitive(True)
+        self._export_csv_button.set_sensitive(True)
 
     def _create_clean_files_summary_row(
         self, clean_count: int, total_files: int, total_dirs: int
@@ -923,3 +970,18 @@ class ScanView(Gtk.Box):
             "Review the file and delete if not recognized or needed. "
             "This is likely a low-risk detection but should still be investigated."
         )
+
+    def _on_copy_results_clicked(self, button):
+        """Handle copy to clipboard button click."""
+        # Placeholder - will be implemented in subtask-5-2
+        pass
+
+    def _on_export_text_clicked(self, button):
+        """Handle export to text file button click."""
+        # Placeholder - will be implemented in subtask-5-3
+        pass
+
+    def _on_export_csv_clicked(self, button):
+        """Handle export to CSV file button click."""
+        # Placeholder - will be implemented in subtask-5-4
+        pass
