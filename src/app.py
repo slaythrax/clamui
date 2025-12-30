@@ -20,15 +20,8 @@ from .ui.preferences_window import PreferencesWindow
 from .core.settings_manager import SettingsManager
 from .core.notification_manager import NotificationManager
 
-# Tray indicator import - may fail due to GTK3/GTK4 version conflict
-# or missing AyatanaAppIndicator3 library
-try:
-    from .ui.tray_indicator import TrayIndicator
-    _TRAY_AVAILABLE = True
-except (ValueError, ImportError) as e:
-    logging.warning(f"Tray indicator not available: {e}")
-    TrayIndicator = None
-    _TRAY_AVAILABLE = False
+# Tray manager - uses subprocess to avoid GTK3/GTK4 version conflict
+from .ui.tray_manager import TrayManager
 
 
 logger = logging.getLogger(__name__)
@@ -202,13 +195,9 @@ class ClamUIApp(Adw.Application):
         self.add_action(show_components_action)
 
     def _setup_tray_indicator(self):
-        """Initialize the system tray indicator if available."""
-        if not _TRAY_AVAILABLE:
-            logger.info("Tray indicator not available, skipping initialization")
-            return
-
+        """Initialize the system tray indicator subprocess."""
         try:
-            self._tray_indicator = TrayIndicator()
+            self._tray_indicator = TrayManager()
 
             # Connect tray menu actions to handler methods
             self._tray_indicator.set_action_callbacks(
@@ -218,8 +207,17 @@ class ClamUIApp(Adw.Application):
                 on_quit=self._on_tray_quit
             )
 
-            self._tray_indicator.activate()
-            logger.info("Tray indicator initialized and activated")
+            # Set window toggle callback
+            self._tray_indicator.set_window_toggle_callback(
+                on_toggle=self._on_tray_window_toggle
+            )
+
+            # Start the tray subprocess
+            if self._tray_indicator.start():
+                logger.info("Tray indicator subprocess started")
+            else:
+                logger.warning("Failed to start tray indicator subprocess")
+                self._tray_indicator = None
         except Exception as e:
             logger.warning(f"Failed to initialize tray indicator: {e}")
             self._tray_indicator = None
@@ -398,6 +396,27 @@ class ClamUIApp(Adw.Application):
         """Execute quit on main thread."""
         self.quit()
         return False  # Don't repeat
+
+    def _on_tray_window_toggle(self) -> None:
+        """
+        Handle window toggle action from tray menu.
+
+        Shows or hides the main window.
+        """
+        win = self.props.active_window
+        if win is None:
+            # No window exists, create one
+            self.activate()
+        elif win.get_visible():
+            # Window visible, hide it
+            win.hide()
+            if self._tray_indicator:
+                self._tray_indicator.update_window_menu_label(visible=False)
+        else:
+            # Window hidden, show it
+            win.present()
+            if self._tray_indicator:
+                self._tray_indicator.update_window_menu_label(visible=True)
 
     # Scan state change handler (for tray integration)
 
