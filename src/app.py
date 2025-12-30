@@ -3,6 +3,8 @@
 Main Adwaita Application class for ClamUI.
 """
 
+import logging
+
 import gi
 gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
@@ -16,6 +18,19 @@ from .ui.components_view import ComponentsView
 from .ui.preferences_window import PreferencesWindow
 from .core.settings_manager import SettingsManager
 from .core.notification_manager import NotificationManager
+
+# Tray indicator import - may fail due to GTK3/GTK4 version conflict
+# or missing AyatanaAppIndicator3 library
+try:
+    from .ui.tray_indicator import TrayIndicator
+    _TRAY_AVAILABLE = True
+except (ValueError, ImportError) as e:
+    logging.warning(f"Tray indicator not available: {e}")
+    TrayIndicator = None
+    _TRAY_AVAILABLE = False
+
+
+logger = logging.getLogger(__name__)
 
 
 class ClamUIApp(Adw.Application):
@@ -48,6 +63,9 @@ class ClamUIApp(Adw.Application):
         self._components_view = None
         self._current_view = None
 
+        # Tray indicator (initialized in do_startup if available)
+        self._tray_indicator = None
+
     @property
     def app_name(self) -> str:
         """Get the application name."""
@@ -67,6 +85,11 @@ class ClamUIApp(Adw.Application):
     def settings_manager(self) -> SettingsManager:
         """Get the settings manager instance."""
         return self._settings_manager
+
+    @property
+    def tray_indicator(self):
+        """Get the tray indicator instance (may be None if not available)."""
+        return self._tray_indicator
 
     def do_activate(self):
         """
@@ -111,6 +134,9 @@ class ClamUIApp(Adw.Application):
         # Set up application actions
         self._setup_actions()
 
+        # Initialize tray indicator if available
+        self._setup_tray_indicator()
+
     def _setup_actions(self):
         """Set up application-level actions."""
         # Quit action
@@ -146,6 +172,20 @@ class ClamUIApp(Adw.Application):
         show_components_action = Gio.SimpleAction.new("show-components", None)
         show_components_action.connect("activate", self._on_show_components)
         self.add_action(show_components_action)
+
+    def _setup_tray_indicator(self):
+        """Initialize the system tray indicator if available."""
+        if not _TRAY_AVAILABLE:
+            logger.info("Tray indicator not available, skipping initialization")
+            return
+
+        try:
+            self._tray_indicator = TrayIndicator()
+            self._tray_indicator.activate()
+            logger.info("Tray indicator initialized and activated")
+        except Exception as e:
+            logger.warning(f"Failed to initialize tray indicator: {e}")
+            self._tray_indicator = None
 
     def _on_quit(self, action, param):
         """Handle quit action."""
