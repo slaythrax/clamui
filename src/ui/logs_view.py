@@ -47,8 +47,8 @@ class LogsView(Gtk.Box):
         # Set up the UI
         self._setup_ui()
 
-        # Load logs on startup
-        GLib.idle_add(self._load_logs)
+        # Load logs on startup asynchronously
+        GLib.idle_add(self._load_logs_async)
 
     def _setup_ui(self):
         """Set up the logs view UI layout."""
@@ -271,8 +271,15 @@ class LogsView(Gtk.Box):
         # Check daemon status on load
         GLib.idle_add(self._check_daemon_status)
 
-    def _load_logs(self) -> bool:
-        """Load and display historical logs."""
+    def _load_logs_async(self):
+        """Load and display historical logs asynchronously."""
+        # Prevent duplicate load requests
+        if self._is_loading:
+            return
+
+        # Set loading state
+        self._set_loading_state(True)
+
         # Clear existing rows
         while True:
             row = self._logs_listbox.get_row_at_index(0)
@@ -280,9 +287,22 @@ class LogsView(Gtk.Box):
                 break
             self._logs_listbox.remove(row)
 
-        # Get logs from log manager
-        logs = self._log_manager.get_logs(limit=100)
+        # Get logs from log manager asynchronously
+        self._log_manager.get_logs_async(
+            callback=self._on_logs_loaded,
+            limit=100
+        )
 
+    def _on_logs_loaded(self, logs: list) -> bool:
+        """
+        Handle completion of async log loading.
+
+        Args:
+            logs: List of LogEntry objects from the log manager
+
+        Returns:
+            False to prevent GLib.idle_add from repeating
+        """
         # Add log entries to list
         for entry in logs:
             row = self._create_log_row(entry)
@@ -290,6 +310,9 @@ class LogsView(Gtk.Box):
 
         # Update clear button sensitivity
         self._clear_button.set_sensitive(len(logs) > 0)
+
+        # Reset loading state
+        self._set_loading_state(False)
 
         return False  # Don't repeat
 
@@ -463,7 +486,7 @@ class LogsView(Gtk.Box):
         """Handle clear confirmation dialog response."""
         if response == "clear":
             self._log_manager.clear_logs()
-            self._load_logs()
+            self._load_logs_async()
 
             # Clear detail view
             buffer = self._detail_text.get_buffer()
@@ -472,7 +495,7 @@ class LogsView(Gtk.Box):
 
     def _on_refresh_clicked(self, button: Gtk.Button):
         """Handle refresh button click."""
-        self._load_logs()
+        self._load_logs_async()
 
     def _set_loading_state(self, is_loading: bool):
         """
@@ -578,7 +601,7 @@ class LogsView(Gtk.Box):
 
         Can be called externally when new logs are added.
         """
-        GLib.idle_add(self._load_logs)
+        GLib.idle_add(self._load_logs_async)
 
     def do_unmap(self):
         """Handle widget unmapping (being hidden)."""
