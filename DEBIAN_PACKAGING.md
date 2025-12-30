@@ -349,146 +349,678 @@ sudo dpkg -P clamui
 
 ## Verification Commands
 
+This section provides comprehensive commands for verifying the package at every stage.
+
+### Package Integrity Checks
+
+```bash
+# Verify package file exists and show size
+ls -la clamui_*.deb
+
+# Check file type (should show "Debian binary package")
+file clamui_0.1.0_all.deb
+
+# Verify archive integrity
+ar -t clamui_0.1.0_all.deb
+# Expected output:
+# debian-binary
+# control.tar.xz (or .gz)
+# data.tar.xz (or .gz)
+
+# Calculate checksum for distribution
+sha256sum clamui_0.1.0_all.deb
+md5sum clamui_0.1.0_all.deb
+```
+
 ### Before Installation
 
 ```bash
-# Show package information
+# Show package information (name, version, dependencies, description)
 dpkg -I clamui_0.1.0_all.deb
 
-# List package contents
+# List package contents with full paths
 dpkg -c clamui_0.1.0_all.deb
 
 # Extract package without installing (for inspection)
+mkdir -p ./extract-test/
 dpkg-deb -x clamui_0.1.0_all.deb ./extract-test/
 dpkg-deb -e clamui_0.1.0_all.deb ./extract-test/DEBIAN/
+
+# Inspect extracted control file
+cat ./extract-test/DEBIAN/control
+
+# Inspect extracted maintainer scripts
+cat ./extract-test/DEBIAN/postinst
+cat ./extract-test/DEBIAN/prerm
+cat ./extract-test/DEBIAN/postrm
+
+# Clean up extraction directory
+rm -rf ./extract-test/
+
+# Verify dependencies are available (dry-run)
+apt-cache show python3-gi gir1.2-gtk-4.0 gir1.2-adw-1 clamav > /dev/null && echo "All dependencies available"
 ```
 
 ### After Installation
 
 ```bash
-# Check if package is installed
+# Check if package is installed (shows status, version, description)
 dpkg -l clamui
 
-# Show installed package details
+# Show installed package details (full metadata)
 dpkg -s clamui
 
-# List files installed by package
+# List all files installed by the package
 dpkg -L clamui
 
 # Find which package owns a file
 dpkg -S /usr/bin/clamui
 
-# Verify clamui is in PATH
+# Verify binary is in PATH and executable
 which clamui
+test -x "$(which clamui)" && echo "Executable OK"
+
+# Check binary permissions
+ls -la /usr/bin/clamui
+
+# Verify Python modules are installed
+ls -la /usr/lib/python3/dist-packages/clamui/
+
+# Test Python import (non-GUI test)
+python3 -c "from clamui.main import main; print('Import OK')"
+
+# Verify desktop file is installed
+ls -la /usr/share/applications/com.github.rooki.ClamUI.desktop
+
+# Validate desktop file
+desktop-file-validate /usr/share/applications/com.github.rooki.ClamUI.desktop 2>&1 || echo "Note: desktop-file-validate not installed (install desktop-file-utils)"
+
+# Verify icon is installed
+ls -la /usr/share/icons/hicolor/scalable/apps/com.github.rooki.ClamUI.svg
+
+# Verify metainfo is installed
+ls -la /usr/share/metainfo/com.github.rooki.ClamUI.metainfo.xml
+
+# Validate AppStream metadata
+appstreamcli validate /usr/share/metainfo/com.github.rooki.ClamUI.metainfo.xml 2>&1 || echo "Note: appstreamcli not installed (install appstream)"
+```
+
+### Application Launch Verification
+
+```bash
+# Basic launch test (will show GUI if display available)
+clamui
+
+# Launch with environment debugging
+G_MESSAGES_DEBUG=all clamui
+
+# Check for GTK/GLib warnings
+clamui 2>&1 | head -50
+
+# Verify display requirements are met (for headless servers)
+echo $DISPLAY  # Should not be empty for GUI apps
+```
+
+### Complete Verification Workflow
+
+Run this complete verification sequence after building:
+
+```bash
+#!/bin/bash
+# complete-verification.sh
+
+echo "=== Package Verification ==="
+PKG="clamui_0.1.0_all.deb"
+
+# 1. Check package exists
+echo "1. Checking package exists..."
+test -f "$PKG" || { echo "FAIL: Package not found"; exit 1; }
+echo "   OK: $PKG exists ($(du -h "$PKG" | cut -f1))"
+
+# 2. Verify package metadata
+echo "2. Verifying package metadata..."
+dpkg -I "$PKG" | grep -q "Package: clamui" || { echo "FAIL: Wrong package name"; exit 1; }
+echo "   OK: Package metadata valid"
+
+# 3. Check expected files
+echo "3. Checking package contents..."
+dpkg -c "$PKG" | grep -q "usr/bin/clamui" || { echo "FAIL: Missing /usr/bin/clamui"; exit 1; }
+dpkg -c "$PKG" | grep -q "dist-packages/clamui" || { echo "FAIL: Missing Python modules"; exit 1; }
+echo "   OK: Expected files present"
+
+# 4. Verify dependencies are satisfiable
+echo "4. Checking dependencies..."
+DEPS=$(dpkg -I "$PKG" | grep "Depends:" | sed 's/Depends://')
+echo "   Dependencies: $DEPS"
+echo "   (Run: sudo apt install -f after dpkg -i to resolve)"
+
+echo ""
+echo "=== Verification Complete ==="
+echo "Install with: sudo dpkg -i $PKG"
 ```
 
 ---
 
 ## Troubleshooting
 
+This section covers common issues encountered during building, installation, and running ClamUI from the Debian package.
+
+### Quick Diagnostics
+
+Run these commands first to gather diagnostic information:
+
+```bash
+# System information
+lsb_release -a
+uname -a
+python3 --version
+
+# Check if package is installed
+dpkg -l clamui 2>/dev/null || echo "Package not installed"
+
+# Check GTK/libadwaita availability
+python3 -c "import gi; gi.require_version('Gtk', '4.0'); gi.require_version('Adw', '1'); print('GTK4/libadwaita OK')" 2>&1
+
+# Check ClamAV availability
+which clamscan && clamscan --version
+```
+
 ### Build Errors
 
 #### "dpkg-deb not found"
 
+**Symptom:** Build script fails with "dpkg-deb: command not found"
+
+**Solution:**
 ```bash
-# Install dpkg-dev
+# Install dpkg-dev package
 sudo apt install dpkg-dev
+
+# Verify installation
+dpkg-deb --version
 ```
 
 #### "fakeroot not found"
 
+**Symptom:** Build script fails with "fakeroot: command not found"
+
+**Solution:**
 ```bash
-# Install fakeroot
+# Install fakeroot package
 sudo apt install fakeroot
+
+# Verify installation
+fakeroot --version
 ```
 
 #### "pyproject.toml not found"
 
-Ensure you're running the build script from the project root:
+**Symptom:** Build script fails with "pyproject.toml not found"
 
+**Cause:** Running the build script from the wrong directory.
+
+**Solution:**
 ```bash
+# Navigate to project root first
 cd /path/to/clamui
+ls pyproject.toml  # Verify file exists
+
+# Now run build script
 ./debian/build-deb.sh
 ```
 
 #### "Could not extract version"
 
-Check that `pyproject.toml` contains a valid version:
+**Symptom:** Build script fails with "Could not extract version from pyproject.toml"
 
-```toml
-[project]
-version = "0.1.0"
+**Cause:** Missing or malformed version field in pyproject.toml.
+
+**Solution:**
+```bash
+# Check version field exists
+grep 'version' pyproject.toml
+
+# Ensure format is correct (must be under [project] section)
+# Example:
+# [project]
+# version = "0.1.0"
+```
+
+#### "src/ directory not found"
+
+**Symptom:** Build script fails with "Source directory not found"
+
+**Cause:** Missing source code or incorrect project structure.
+
+**Solution:**
+```bash
+# Verify project structure
+ls -la src/
+ls -la src/main.py
+
+# Ensure you have the complete source
+git status
+```
+
+#### "Permission denied" during build
+
+**Symptom:** Build fails with permission errors when creating directories or files
+
+**Cause:** Build directory has incorrect permissions or is on a read-only filesystem.
+
+**Solution:**
+```bash
+# Check current directory is writable
+touch test-write && rm test-write || echo "Directory not writable"
+
+# Clean up any previous build with wrong permissions
+sudo rm -rf build-deb/
+rm -rf build-deb/
+
+# Retry build
+./debian/build-deb.sh
+```
+
+#### "dpkg-deb: error: control directory has bad permissions"
+
+**Symptom:** dpkg-deb fails with permissions error
+
+**Cause:** DEBIAN directory or control files have incorrect permissions.
+
+**Solution:**
+```bash
+# This is handled by the build script, but if building manually:
+chmod 755 build-deb/DEBIAN
+chmod 644 build-deb/DEBIAN/control
+chmod 755 build-deb/DEBIAN/postinst
+chmod 755 build-deb/DEBIAN/prerm
+chmod 755 build-deb/DEBIAN/postrm
 ```
 
 ### Installation Errors
 
 #### "Dependency is not satisfiable"
 
-Install missing dependencies:
+**Symptom:** dpkg fails with "dependency problems prevent configuration"
 
+**Solution:**
 ```bash
+# Method 1: Let apt resolve dependencies
+sudo dpkg -i clamui_0.1.0_all.deb
 sudo apt install -f
 
-# Or manually install specific dependencies
-sudo apt install python3-gi gir1.2-gtk-4.0 gir1.2-adw-1 clamav
+# Method 2: Install dependencies first
+sudo apt install python3-gi python3-cairo gir1.2-gtk-4.0 gir1.2-adw-1 clamav
+sudo dpkg -i clamui_0.1.0_all.deb
+
+# Method 3: Use apt directly (if package is in current directory)
+sudo apt install ./clamui_0.1.0_all.deb
 ```
 
 #### "Package architecture does not match"
 
-The ClamUI package is `Architecture: all` and should work on any system. If you see this error, verify the package wasn't corrupted during transfer.
+**Symptom:** dpkg refuses to install package
+
+**Cause:** Corrupted package or wrong package for system.
+
+**Solution:**
+```bash
+# Verify package integrity
+file clamui_0.1.0_all.deb  # Should say "Debian binary package"
+ar -t clamui_0.1.0_all.deb  # Should list debian-binary, control.tar.*, data.tar.*
+
+# Check package architecture (should be 'all' for ClamUI)
+dpkg -I clamui_0.1.0_all.deb | grep Architecture
+
+# Rebuild package if corrupted
+./debian/build-deb.sh
+```
+
+#### "Trying to overwrite file from package"
+
+**Symptom:** Conflict with existing files on the system
+
+**Solution:**
+```bash
+# Check which package owns the conflicting file
+dpkg -S /path/to/conflicting/file
+
+# Force overwrite (use with caution)
+sudo dpkg -i --force-overwrite clamui_0.1.0_all.deb
+```
+
+#### "Package is in a very bad inconsistent state"
+
+**Symptom:** dpkg refuses to operate on package
+
+**Cause:** Previous installation/removal was interrupted.
+
+**Solution:**
+```bash
+# Force remove broken package
+sudo dpkg --remove --force-remove-reinstreq clamui
+
+# Clean up
+sudo apt autoremove
+sudo apt clean
+
+# Reinstall
+sudo dpkg -i clamui_0.1.0_all.deb
+```
+
+#### Old version not upgrading
+
+**Symptom:** Installing new version but old version remains
+
+**Solution:**
+```bash
+# Check installed version
+dpkg -s clamui | grep Version
+
+# Remove old version first
+sudo dpkg -r clamui
+
+# Install new version
+sudo dpkg -i clamui_0.1.0_all.deb
+```
 
 ### Runtime Errors
 
 #### "ModuleNotFoundError: No module named 'clamui'"
 
-The Python path may not include the system packages directory:
+**Symptom:** Python cannot find the clamui module
 
+**Cause:** Python path doesn't include system packages directory.
+
+**Solution:**
 ```bash
-# Check if clamui is installed
+# Verify module is installed
 ls /usr/lib/python3/dist-packages/clamui/
 
-# Run with explicit Python path
+# Check Python path
+python3 -c "import sys; print('\n'.join(sys.path))"
+
+# Temporary fix: Run with explicit path
 PYTHONPATH=/usr/lib/python3/dist-packages python3 -m clamui.main
+
+# Permanent fix: Reinstall package
+sudo dpkg -r clamui
+sudo dpkg -i clamui_0.1.0_all.deb
 ```
 
 #### "No module named 'gi'"
 
-GTK Python bindings are missing:
+**Symptom:** PyGObject bindings not found
 
+**Solution:**
 ```bash
 sudo apt install python3-gi python3-cairo
+
+# Verify installation
+python3 -c "import gi; print('gi module OK')"
 ```
 
-#### "Namespace Gtk not available"
+#### "Namespace Gtk not available" / "Gtk-4.0"
 
-GTK 4 introspection data is missing:
+**Symptom:** GTK 4 typelib not found
 
+**Solution:**
 ```bash
 sudo apt install gir1.2-gtk-4.0
+
+# Verify
+python3 -c "import gi; gi.require_version('Gtk', '4.0'); from gi.repository import Gtk; print('GTK4 OK')"
 ```
 
-#### "Namespace Adw not available"
+#### "Namespace Adw not available" / "Adw-1"
 
-libadwaita introspection data is missing:
+**Symptom:** libadwaita typelib not found
 
+**Solution:**
 ```bash
 sudo apt install gir1.2-adw-1
+
+# Verify
+python3 -c "import gi; gi.require_version('Adw', '1'); from gi.repository import Adw; print('libadwaita OK')"
 ```
+
+#### "cannot open display"
+
+**Symptom:** Application fails to start with display error
+
+**Cause:** No graphical display available (common in SSH or headless servers).
+
+**Solution:**
+```bash
+# Check if display is set
+echo $DISPLAY
+
+# If empty, set display (if X server is running)
+export DISPLAY=:0
+
+# For SSH, use X forwarding
+ssh -X user@host
+clamui
+
+# For testing without display, use Xvfb (virtual framebuffer)
+sudo apt install xvfb
+xvfb-run clamui
+```
+
+#### "Gtk-WARNING: cannot open display"
+
+**Symptom:** GTK cannot connect to display server
+
+**Solution:**
+```bash
+# Check Wayland vs X11
+echo $XDG_SESSION_TYPE
+
+# For Wayland
+GDK_BACKEND=wayland clamui
+
+# For X11
+GDK_BACKEND=x11 clamui
+
+# With debugging
+GTK_DEBUG=interactive clamui
+```
+
+#### ClamAV integration not working
+
+**Symptom:** Scans fail or ClamAV not detected
+
+**Solution:**
+```bash
+# Check ClamAV installation
+which clamscan freshclam
+
+# Install if missing
+sudo apt install clamav clamav-daemon
+
+# Update virus definitions
+sudo freshclam
+
+# Test scan manually
+clamscan --version
+echo "EICAR-STANDARD-ANTIVIRUS-TEST-FILE" > /tmp/test.txt
+clamscan /tmp/test.txt
+rm /tmp/test.txt
+```
+
+### Desktop Integration Issues
 
 #### Application icon not showing
 
-Refresh the icon cache:
+**Symptom:** ClamUI icon missing from application menu or launcher
 
+**Solution:**
 ```bash
+# Force icon cache refresh
+sudo gtk-update-icon-cache -f /usr/share/icons/hicolor
+
+# Verify icon exists
+ls -la /usr/share/icons/hicolor/scalable/apps/com.github.rooki.ClamUI.svg
+
+# Check icon cache timestamp
+ls -la /usr/share/icons/hicolor/icon-theme.cache
+```
+
+#### Application not appearing in menu
+
+**Symptom:** ClamUI not visible in applications menu
+
+**Solution:**
+```bash
+# Update desktop database
+sudo update-desktop-database /usr/share/applications/
+
+# Verify desktop file exists and is valid
+ls -la /usr/share/applications/com.github.rooki.ClamUI.desktop
+desktop-file-validate /usr/share/applications/com.github.rooki.ClamUI.desktop
+
+# Check for syntax errors in desktop file
+cat /usr/share/applications/com.github.rooki.ClamUI.desktop
+
+# Log out and log back in for menu to refresh
+```
+
+#### Desktop file validation errors
+
+**Symptom:** `desktop-file-validate` reports errors
+
+**Solution:**
+```bash
+# Check specific errors
+desktop-file-validate /usr/share/applications/com.github.rooki.ClamUI.desktop
+
+# Common fixes:
+# - Ensure Exec= points to valid binary
+# - Ensure Icon= name matches installed icon (without extension for system icons)
+# - Ensure Categories= uses valid categories
+```
+
+### Package Removal Issues
+
+#### Files left behind after removal
+
+**Symptom:** Some ClamUI files remain after `dpkg -r`
+
+**Cause:** Configuration files are kept during removal (use purge instead).
+
+**Solution:**
+```bash
+# Full removal including config
+sudo dpkg -P clamui
+
+# Manually remove any leftovers
+sudo rm -rf /usr/lib/python3/dist-packages/clamui/
+sudo rm -f /usr/bin/clamui
+sudo rm -f /usr/share/applications/com.github.rooki.ClamUI.desktop
+
+# Refresh caches
+sudo update-desktop-database
 sudo gtk-update-icon-cache -f /usr/share/icons/hicolor
 ```
 
-#### Application not in menu
+#### "Package is not installed"
 
-Refresh the desktop database:
+**Symptom:** Trying to remove but package shows as not installed
+
+**Solution:**
+```bash
+# Check actual status
+dpkg -l clamui
+
+# If partially installed
+sudo dpkg --configure -a
+sudo apt install -f
+
+# Force removal of residual config
+sudo dpkg --purge --force-remove-reinstreq clamui
+```
+
+### Upgrade Issues
+
+#### Configuration preserved unexpectedly
+
+**Symptom:** Old settings persist after upgrade
+
+**Cause:** User configuration in home directory is not managed by package.
+
+**Solution:**
+```bash
+# ClamUI stores user config in ~/.config/clamui/ (not managed by dpkg)
+# To reset, remove user config
+rm -rf ~/.config/clamui/
+
+# Then restart application
+clamui
+```
+
+#### Version mismatch after upgrade
+
+**Symptom:** Application shows old version after installing newer package
+
+**Solution:**
+```bash
+# Check installed version
+dpkg -s clamui | grep Version
+
+# Verify you installed the correct package
+dpkg -I clamui_0.1.0_all.deb | grep Version
+
+# Remove and reinstall
+sudo dpkg -P clamui
+sudo dpkg -i clamui_0.1.0_all.deb
+```
+
+### Debugging Tips
+
+#### Enable verbose GTK debugging
 
 ```bash
-sudo update-desktop-database
+# General debugging
+G_MESSAGES_DEBUG=all clamui 2>&1 | tee clamui-debug.log
+
+# GTK-specific debugging
+GTK_DEBUG=actions,gestures,keybindings clamui
+
+# GLib debugging
+G_DEBUG=fatal-warnings clamui
+```
+
+#### Check system logs
+
+```bash
+# Recent journal entries
+journalctl --since "5 minutes ago" | grep -i clamui
+
+# Syslog entries
+grep clamui /var/log/syslog
+```
+
+#### Verify package integrity after installation
+
+```bash
+# Compare installed files against package
+dpkg -V clamui
+
+# Empty output means all files match package
+# Any output indicates modified/missing files
+```
+
+#### Test in isolated environment
+
+```bash
+# Use Docker for clean environment testing
+docker run -it --rm -v $(pwd):/pkg debian:bookworm bash
+
+# Inside container:
+apt update
+apt install -y /pkg/clamui_0.1.0_all.deb
+apt install -f
+# Note: GUI testing requires display passthrough
 ```
 
 ---
