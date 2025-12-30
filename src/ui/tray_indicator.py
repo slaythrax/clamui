@@ -401,14 +401,27 @@ class TrayIndicator:
         Clean up resources and remove the indicator from tray.
 
         Should be called before application exit to prevent ghost icons.
+        Clears all references to prevent circular reference leaks.
         """
+        # Deactivate first to hide the icon immediately
         self.deactivate()
+
+        # Clear action callbacks to break circular references
+        self._on_quick_scan = None
+        self._on_full_scan = None
+        self._on_update = None
+        self._on_quit = None
+
+        # Clear window toggle callbacks
+        self._on_window_toggle = None
+        self._get_window_visible = None
+        self._show_window_item = None
+
+        # Clear GTK resources
         self._menu = None
         self._indicator = None
         self._icon_theme = None
-        self._show_window_item = None
-        self._on_window_toggle = None
-        self._get_window_visible = None
+
         logger.debug("Tray indicator cleaned up")
 
     @property

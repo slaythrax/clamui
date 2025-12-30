@@ -443,3 +443,19 @@ class ClamUIApp(Adw.Application):
                 # No result provided, default to protected
                 self._tray_indicator.update_status("protected")
                 logger.debug("Tray updated to protected state (no result)")
+
+    def do_shutdown(self):
+        """
+        Handle application shutdown.
+
+        This method is called when the application is about to terminate.
+        It performs cleanup of resources including the tray indicator.
+        """
+        # Clean up tray indicator to prevent ghost icons
+        if self._tray_indicator is not None:
+            self._tray_indicator.cleanup()
+            self._tray_indicator = None
+            logger.debug("Tray indicator cleanup completed during shutdown")
+
+        # Call parent shutdown
+        Adw.Application.do_shutdown(self)
