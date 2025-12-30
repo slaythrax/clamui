@@ -39,6 +39,7 @@ dev = [
 
 [project.scripts]
 clamui = "src.main:main"
+clamui-scheduled-scan = "src.cli.scheduled_scan:main"
 
 [project.urls]
 Homepage = "https://github.com/yourusername/clamui"
