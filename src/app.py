@@ -400,4 +400,22 @@ class ClamUIApp(Adw.Application):
         else:
             # Clear progress label
             self._tray_indicator.update_scan_progress(0)
-            logger.debug("Tray scan progress cleared")
+
+            # Update tray icon based on scan result
+            if result is not None:
+                if result.has_threats:
+                    # Threats detected - show alert/threat status
+                    self._tray_indicator.update_status("threat")
+                    logger.debug(f"Tray updated to threat state ({result.infected_count} threats)")
+                elif result.is_clean:
+                    # No threats - show protected status
+                    self._tray_indicator.update_status("protected")
+                    logger.debug("Tray updated to protected state (scan clean)")
+                else:
+                    # Error or cancelled - show warning status
+                    self._tray_indicator.update_status("warning")
+                    logger.debug(f"Tray updated to warning state (status: {result.status.value})")
+            else:
+                # No result provided, default to protected
+                self._tray_indicator.update_status("protected")
+                logger.debug("Tray updated to protected state (no result)")
