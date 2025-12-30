@@ -479,47 +479,47 @@ class LogsView(Gtk.Box):
         # get_mapped() returns False if widget is not visible/attached
         try:
             if not self.get_mapped():
-                # Widget is not mapped, reset loading state properly
-                # This stops the spinner and enables buttons
-                self._set_loading_state(False)
+                # Widget is not mapped, just reset loading flag
+                # Don't try to manipulate widgets as they may be invalid
+                self._is_loading = False
                 return False
         except Exception:
             # Widget may be in an invalid state, reset loading flag
             self._is_loading = False
             return False
 
-        # Clear existing rows efficiently using remove_all()
-        # This is much faster than removing rows one-by-one in a loop
+        # Wrap all UI operations in try/finally to ensure loading state is always reset
         try:
-            self._logs_listbox.remove_all()
-        except Exception:
-            # Widget may be in invalid state, reset and return
-            self._set_loading_state(False)
-            return False
-
-        # Handle empty logs - placeholder will be shown automatically
-        # by GTK ListBox since we set it with set_placeholder()
-        if not logs:
-            # Ensure clear button is disabled for empty state
-            self._clear_button.set_sensitive(False)
-            self._set_loading_state(False)
-            return False
-
-        # Add log entries to list
-        for entry in logs:
+            # Clear existing rows efficiently using remove_all()
+            # This is much faster than removing rows one-by-one in a loop
             try:
-                row = self._create_log_row(entry)
-                self._logs_listbox.append(row)
+                self._logs_listbox.remove_all()
             except Exception:
-                # Skip entries that fail to render (corrupted data)
-                continue
+                # Widget may be in invalid state, just return
+                return False
 
-        # Update clear button sensitivity based on actual rendered rows
-        has_logs = self._logs_listbox.get_row_at_index(0) is not None
-        self._clear_button.set_sensitive(has_logs)
+            # Handle empty logs - placeholder will be shown automatically
+            # by GTK ListBox since we set it with set_placeholder()
+            if not logs:
+                # Ensure clear button is disabled for empty state
+                self._clear_button.set_sensitive(False)
+                return False
 
-        # Reset loading state
-        self._set_loading_state(False)
+            # Add log entries to list
+            for entry in logs:
+                try:
+                    row = self._create_log_row(entry)
+                    self._logs_listbox.append(row)
+                except Exception:
+                    # Skip entries that fail to render (corrupted data)
+                    continue
+
+            # Update clear button sensitivity based on actual rendered rows
+            has_logs = self._logs_listbox.get_row_at_index(0) is not None
+            self._clear_button.set_sensitive(has_logs)
+        finally:
+            # ALWAYS reset loading state to prevent stuck "Loading logs" forever
+            self._set_loading_state(False)
 
         return False  # Don't repeat
 
@@ -961,25 +961,31 @@ class LogsView(Gtk.Box):
         """
         self._is_loading = is_loading
 
-        if is_loading:
-            # Show loading state in header
-            self._logs_spinner.set_visible(True)
-            self._logs_spinner.start()
-            self._refresh_button.set_sensitive(False)
-            self._clear_button.set_sensitive(False)
+        try:
+            if is_loading:
+                # Show loading state in header first (fast, non-blocking)
+                self._logs_spinner.set_visible(True)
+                self._logs_spinner.start()
+                self._refresh_button.set_sensitive(False)
+                self._clear_button.set_sensitive(False)
 
-            # Clear existing rows and show loading placeholder in listbox
-            self._logs_listbox.remove_all()
-            loading_row = self._create_loading_state()
-            self._logs_listbox.append(loading_row)
-        else:
-            # Restore normal header state
-            self._logs_spinner.stop()
-            self._logs_spinner.set_visible(False)
-            self._refresh_button.set_sensitive(True)
-            # Clear button sensitivity will be updated based on log count
-            # in the calling code after loading completes
-            # Note: Loading row is removed by _on_logs_loaded() calling remove_all()
+                # Clear existing rows and show loading placeholder in listbox
+                # This is done synchronously but is fast enough for typical row counts
+                self._logs_listbox.remove_all()
+                loading_row = self._create_loading_state()
+                self._logs_listbox.append(loading_row)
+            else:
+                # Restore normal header state
+                self._logs_spinner.stop()
+                self._logs_spinner.set_visible(False)
+                self._refresh_button.set_sensitive(True)
+                # Clear button sensitivity will be updated based on log count
+                # in the calling code after loading completes
+                # Note: Loading row is removed by _on_logs_loaded() calling remove_all()
+        except Exception:
+            # Ensure loading flag is reset even if widget operations fail
+            # This prevents stuck loading state
+            self._is_loading = False
 
     def _check_daemon_status(self) -> bool:
         """Check and display daemon status."""
