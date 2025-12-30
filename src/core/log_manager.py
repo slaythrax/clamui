@@ -218,8 +218,13 @@ class LogManager:
             log_type: Optional filter by type ("scan" or "update")
         """
         def _load_logs_thread():
-            entries = self.get_logs(limit=limit, log_type=log_type)
-            # Schedule callback on main thread
+            try:
+                entries = self.get_logs(limit=limit, log_type=log_type)
+            except Exception:
+                # On any error, return empty list to ensure callback is always called
+                # This prevents loading state from getting stuck forever
+                entries = []
+            # Schedule callback on main thread - always called to reset loading state
             GLib.idle_add(callback, entries)
 
         thread = threading.Thread(target=_load_logs_thread)
