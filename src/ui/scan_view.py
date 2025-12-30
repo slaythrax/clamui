@@ -534,18 +534,6 @@ class ScanView(Gtk.Box):
         """
         self._set_scanning_state(False)
         self._display_results(result)
-
-        # Send notification
-        root = self.get_root()
-        if root:
-            app = root.get_application()
-            if app and hasattr(app, 'notification_manager'):
-                app.notification_manager.notify_scan_complete(
-                    is_clean=result.is_clean,
-                    infected_count=result.infected_count,
-                    scanned_count=result.scanned_files
-                )
-
         return False  # Don't repeat GLib.idle_add
 
     def _clear_results(self):
@@ -572,256 +560,43 @@ class ScanView(Gtk.Box):
             self._status_banner.add_css_class("error")
             self._status_banner.remove_css_class("success")
             self._status_banner.remove_css_class("warning")
-        elif result.status == ScanStatus.CANCELLED:
-            self._status_banner.set_title("Scan cancelled")
+        else:  # ERROR status
+            self._status_banner.set_title(f"Scan error: {result.error_message}")
             self._status_banner.add_css_class("warning")
             self._status_banner.remove_css_class("success")
             self._status_banner.remove_css_class("error")
-        else:  # ERROR
-            self._status_banner.set_title(result.error_message or "Scan error occurred")
-            self._status_banner.add_css_class("error")
-            self._status_banner.remove_css_class("success")
-            self._status_banner.remove_css_class("warning")
 
         self._status_banner.set_button_label(None)
         self._status_banner.set_revealed(True)
 
-        # Build results text
-        lines = []
-
-        # Header with scan status
-        if result.status == ScanStatus.CLEAN:
-            lines.append("SCAN COMPLETE - NO THREATS FOUND")
-        elif result.status == ScanStatus.INFECTED:
-            lines.append("WARNING: THREATS DETECTED")
-        elif result.status == ScanStatus.CANCELLED:
-            lines.append("SCAN CANCELLED")
-        else:
-            lines.append("SCAN ERROR")
-
-        lines.append("=" * 50)
-        lines.append("")
-
-        # Path scanned
-        lines.append(f"Scanned: {result.path}")
-        lines.append("")
-
-        # Summary statistics
-        lines.append("Summary:")
-        lines.append(f"  Scanned files: {result.scanned_files}")
-        lines.append(f"  Scanned directories: {result.scanned_dirs}")
-        lines.append(f"  Infected files: {result.infected_count}")
-        lines.append("")
-
-        # Infected files list
-        if result.infected_files:
-            lines.append("Infected Files:")
-            for infected_file in result.infected_files:
-                lines.append(f"  - {infected_file}")
-            lines.append("")
-
-        # Error message if present
-        if result.error_message:
-            lines.append(f"Error: {result.error_message}")
-            lines.append("")
-
-        # Raw output section
-        if result.stdout:
-            lines.append("-" * 50)
-            lines.append("Full ClamAV Output:")
-            lines.append("-" * 50)
-            lines.append(result.stdout)
-
-        if result.stderr and result.status == ScanStatus.ERROR:
-            lines.append("-" * 50)
-            lines.append("Error Output:")
-            lines.append("-" * 50)
-            lines.append(result.stderr)
-
-        # Update the text view
+        # Display detailed results in text view
         buffer = self._results_text.get_buffer()
-        buffer.set_text("\n".join(lines))
-
-    def _on_fullscreen_results_clicked(self, button: Gtk.Button):
-        """Handle fullscreen button click for scan results."""
-        # Get current content from results text view
-        buffer = self._results_text.get_buffer()
-        start = buffer.get_start_iter()
-        end = buffer.get_end_iter()
-        content = buffer.get_text(start, end, False)
-
-        # Create and present the fullscreen dialog
-        dialog = FullscreenLogDialog(
-            title="Scan Results",
-            content=content
-        )
-        dialog.present(self.get_root())
-
-    @property
-    def scanner(self) -> Scanner:
-        """
-        Get the scanner instance.
-
-        Returns:
-            The Scanner instance used by this view
-        """
-        return self._scanner
+        buffer.set_text(result.output)
 
     def _on_test_clamav_clicked(self, button):
-        """Handle Test ClamAV button click."""
-        self._start_eicar_test()
-
-    def _start_eicar_test(self):
-        """Start the EICAR test scan."""
+        """Handle test ClamAV button click."""
         # Create a temporary file with EICAR test string
         try:
-            # Create temp file in a secure manner
-            fd, temp_path = tempfile.mkstemp(suffix=".com", prefix="eicar_test_")
-            self._eicar_temp_path = temp_path
-
-            # Write the EICAR test string
-            with os.fdopen(fd, 'w') as f:
+            with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.txt') as f:
                 f.write(EICAR_TEST_STRING)
+                self._eicar_temp_path = f.name
 
-        except OSError as e:
-            # Show error if temp file creation fails
-            buffer = self._results_text.get_buffer()
-            buffer.set_text(f"Failed to create test file: {e}")
-            self._status_banner.set_title("Test failed - could not create test file")
+            # Scan the test file
+            self._selected_path = self._eicar_temp_path
+            self._start_scan()
+        except Exception as e:
+            self._status_banner.set_title(f"Error creating test file: {str(e)}")
             self._status_banner.add_css_class("error")
-            self._status_banner.remove_css_class("success")
-            self._status_banner.remove_css_class("warning")
             self._status_banner.set_revealed(True)
-            return
 
-        self._set_scanning_state(True)
-        self._clear_results()
-
-        # Update results text
+    def _on_fullscreen_results_clicked(self, button):
+        """Handle fullscreen results button click."""
         buffer = self._results_text.get_buffer()
-        buffer.set_text(
-            "Testing ClamAV with EICAR test file...\n\n"
-            "The EICAR test file is an industry-standard antivirus test pattern.\n"
-            "If ClamAV is working correctly, it should detect this as infected.\n\n"
-            "Please wait..."
+        text = buffer.get_text(buffer.get_start_iter(), buffer.get_end_iter(), False)
+
+        dialog = FullscreenLogDialog(
+            transient_for=self.get_root(),
+            modal=True,
+            text=text
         )
-
-        # Hide any previous status banner
-        self._status_banner.set_revealed(False)
-
-        # Start async scan with EICAR-specific callback
-        self._scanner.scan_async(
-            self._eicar_temp_path,
-            callback=self._on_eicar_scan_complete
-        )
-
-    def _on_eicar_scan_complete(self, result: ScanResult):
-        """
-        Handle EICAR test scan completion.
-
-        Args:
-            result: The scan result from the scanner
-        """
-        # Clean up temp file first (always, regardless of result)
-        self._cleanup_eicar_temp_file()
-
-        self._set_scanning_state(False)
-        self._display_eicar_results(result)
-        return False  # Don't repeat GLib.idle_add
-
-    def _cleanup_eicar_temp_file(self):
-        """Clean up the temporary EICAR test file."""
-        if self._eicar_temp_path and os.path.exists(self._eicar_temp_path):
-            try:
-                os.remove(self._eicar_temp_path)
-            except OSError:
-                pass  # Ignore cleanup errors
-        self._eicar_temp_path = ""
-
-    def _display_eicar_results(self, result: ScanResult):
-        """
-        Display EICAR test results in the UI.
-
-        Args:
-            result: The scan result to display
-        """
-        # Determine if the test was successful (EICAR detected)
-        test_passed = result.status == ScanStatus.INFECTED
-
-        # Update status banner
-        if test_passed:
-            self._status_banner.set_title("ClamAV is working correctly!")
-            self._status_banner.add_css_class("success")
-            self._status_banner.remove_css_class("error")
-            self._status_banner.remove_css_class("warning")
-        elif result.status == ScanStatus.CANCELLED:
-            self._status_banner.set_title("Test cancelled")
-            self._status_banner.add_css_class("warning")
-            self._status_banner.remove_css_class("success")
-            self._status_banner.remove_css_class("error")
-        elif result.status == ScanStatus.ERROR:
-            self._status_banner.set_title(result.error_message or "Test error occurred")
-            self._status_banner.add_css_class("error")
-            self._status_banner.remove_css_class("success")
-            self._status_banner.remove_css_class("warning")
-        else:
-            # CLEAN status means EICAR wasn't detected - this is a problem
-            self._status_banner.set_title("Warning: ClamAV did not detect test file")
-            self._status_banner.add_css_class("warning")
-            self._status_banner.remove_css_class("success")
-            self._status_banner.remove_css_class("error")
-
-        self._status_banner.set_button_label(None)
-        self._status_banner.set_revealed(True)
-
-        # Build results text
-        lines = []
-
-        if test_passed:
-            lines.append("CLAMAV TEST PASSED")
-            lines.append("=" * 50)
-            lines.append("")
-            lines.append("ClamAV correctly detected the EICAR test file as infected.")
-            lines.append("Your antivirus installation is working properly.")
-        elif result.status == ScanStatus.CANCELLED:
-            lines.append("TEST CANCELLED")
-            lines.append("=" * 50)
-        elif result.status == ScanStatus.ERROR:
-            lines.append("TEST ERROR")
-            lines.append("=" * 50)
-            lines.append("")
-            if result.error_message:
-                lines.append(f"Error: {result.error_message}")
-        else:
-            lines.append("CLAMAV TEST WARNING")
-            lines.append("=" * 50)
-            lines.append("")
-            lines.append("ClamAV did NOT detect the EICAR test file.")
-            lines.append("This may indicate a problem with your ClamAV installation")
-            lines.append("or virus database.")
-
-        lines.append("")
-
-        # Detection details if infected
-        if result.infected_files:
-            lines.append("Detection Details:")
-            for infected_file in result.infected_files:
-                lines.append(f"  - {infected_file}")
-            lines.append("")
-
-        # Raw output section
-        if result.stdout:
-            lines.append("-" * 50)
-            lines.append("ClamAV Output:")
-            lines.append("-" * 50)
-            lines.append(result.stdout)
-
-        if result.stderr and result.status == ScanStatus.ERROR:
-            lines.append("-" * 50)
-            lines.append("Error Output:")
-            lines.append("-" * 50)
-            lines.append(result.stderr)
-
-        # Update the text view
-        buffer = self._results_text.get_buffer()
-        buffer.set_text("\n".join(lines))
+        dialog.present()

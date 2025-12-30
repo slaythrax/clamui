@@ -1,0 +1,50 @@
+app-id: com.github.clamui
+runtime: org.gnome.Platform
+runtime-version: '46'
+sdk: org.gnome.Sdk
+command: clamui
+
+finish-args:
+  # Read-only access to host filesystem for scanning files
+  - --filesystem=host:ro
+  # Read-write access to ClamAV database directory for updates
+  - --filesystem=/var/lib/clamav:rw
+  # D-Bus session access for desktop integration
+  - --socket=session-bus
+  # X11 display access
+  - --socket=x11
+  # Wayland display access
+  - --socket=wayland
+  # GPU acceleration
+  - --device=dri
+  # Desktop icons and themes
+  - --share=ipc
+  # Network access for virus database updates
+  - --share=network
+
+modules:
+  - name: clamav
+    buildsystem: cmake-ninja
+    config-opts:
+      - -DENABLE_CLAMONACC=OFF
+      - -DENABLE_MILTER=OFF
+      - -DENABLE_EXAMPLES=OFF
+      - -DENABLE_MAN_PAGES=OFF
+    sources:
+      - type: archive
+        url: https://www.clamav.net/downloads/production/clamav-1.3.1.tar.gz
+        sha256: 15c9b7e2e5cf03a96c0e9f51fa71d0e9b5fb4f2a2ae0a1ba5c16f8f6f4e1a9a0
+        x-checker-data:
+          type: anitya
+          project-id: 13023
+          url-template: https://www.clamav.net/downloads/production/clamav-$version.tar.gz
+
+  - name: clamui
+    buildsystem: simple
+    build-commands:
+      - pip3 install --prefix=/app --no-deps .
+      - install -Dm644 com.github.clamui.desktop /app/share/applications/com.github.clamui.desktop
+      - install -Dm644 com.github.clamui.svg /app/share/icons/hicolor/scalable/apps/com.github.clamui.svg
+    sources:
+      - type: dir
+        path: .

@@ -6,7 +6,6 @@ Stores scan/update operation logs and provides daemon log access.
 
 import json
 import os
-import shutil
 import subprocess
 import threading
 import uuid
@@ -15,6 +14,8 @@ from datetime import datetime
 from enum import Enum
 from pathlib import Path
 from typing import Optional
+
+from .utils import which_host_command, wrap_host_command
 
 
 class LogType(Enum):
@@ -279,15 +280,15 @@ class LogManager:
         Returns:
             Tuple of (DaemonStatus, optional_message)
         """
-        # Check if clamd is installed
-        clamd_path = shutil.which("clamd")
+        # Check if clamd is installed (checking host if in Flatpak)
+        clamd_path = which_host_command("clamd")
         if clamd_path is None:
             return (DaemonStatus.NOT_INSTALLED, "clamd is not installed")
 
-        # Check if clamd process is running
+        # Check if clamd process is running (on host if in Flatpak)
         try:
             result = subprocess.run(
-                ["pgrep", "-x", "clamd"],
+                wrap_host_command(["pgrep", "-x", "clamd"]),
                 capture_output=True,
                 text=True,
                 timeout=5

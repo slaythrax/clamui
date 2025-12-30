@@ -4,14 +4,19 @@
 Main entry point for the ClamUI application.
 
 This module provides the entry point for launching the ClamUI GTK4/Adwaita
-desktop application. It handles path setup and initializes the GTK main loop.
+desktop application. It handles path setup, CLI argument parsing for file
+scanning, and initializes the GTK main loop.
 
 Usage:
     python src/main.py
+    python src/main.py /path/to/file.txt        # Scan a single file
+    python src/main.py /path/to/folder          # Scan a folder
+    python src/main.py file1.txt folder1 ...    # Scan multiple items
 """
 
 import sys
 import os
+from typing import List
 
 
 def _setup_path():
@@ -36,16 +41,58 @@ _setup_path()
 from src.app import ClamUIApp
 
 
+def parse_file_arguments(argv: List[str]) -> List[str]:
+    """
+    Parse file/folder paths from command line arguments.
+
+    This function extracts file and folder paths from the command line
+    arguments, typically passed from file manager context menu actions
+    via the %F field code in desktop files.
+
+    Args:
+        argv: Command line arguments (sys.argv).
+
+    Returns:
+        List of file/folder paths to scan. Empty list if no paths provided.
+    """
+    # Skip the first argument (program name)
+    # All remaining arguments are treated as file/folder paths
+    file_paths = argv[1:] if len(argv) > 1 else []
+
+    if file_paths:
+        # Log received file paths for debugging context menu integration
+        print(f"ClamUI: Received {len(file_paths)} path(s) for scanning:", file=sys.stderr)
+        for path in file_paths:
+            print(f"  - {path}", file=sys.stderr)
+
+    return file_paths
+
+
 def main():
     """
     Application entry point.
 
-    Creates a ClamUIApp instance and starts the GTK main loop.
+    Parses CLI file arguments and creates a ClamUIApp instance.
+    When file paths are provided (e.g., from file manager context menu),
+    they will be queued for scanning when the application starts.
 
     Returns:
         int: Exit code from the application (0 for success).
     """
+    # Parse file arguments from CLI (e.g., from context menu %F)
+    file_paths = parse_file_arguments(sys.argv)
+
+    # Create application instance
     app = ClamUIApp()
+
+    # Store file paths for processing after activation
+    # The app's do_activate() will handle these paths
+    if file_paths:
+        # Pass file paths to the app if the method is available
+        # (method is added in subtask-2-2)
+        if hasattr(app, 'set_initial_scan_paths'):
+            app.set_initial_scan_paths(file_paths)
+
     return app.run(sys.argv)
 
 

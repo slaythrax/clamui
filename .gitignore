@@ -73,3 +73,6 @@ Thumbs.db
 .idea
 worktrees/
 
+.flatpak-builder/
+build-dir/
+repo/

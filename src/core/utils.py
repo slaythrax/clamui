@@ -10,6 +10,92 @@ from pathlib import Path
 from typing import Tuple, Optional, List
 
 
+# Flatpak detection cache (None = not checked, True/False = result)
+_flatpak_detected: Optional[bool] = None
+
+
+def is_flatpak() -> bool:
+    """
+    Detect if running inside a Flatpak sandbox.
+
+    Uses the presence of /.flatpak-info file as the detection method,
+    which is the standard way to detect Flatpak environment.
+
+    The result is cached after the first check for performance.
+
+    Returns:
+        True if running inside Flatpak sandbox, False otherwise
+    """
+    global _flatpak_detected
+
+    if _flatpak_detected is None:
+        _flatpak_detected = os.path.exists('/.flatpak-info')
+
+    return _flatpak_detected
+
+
+def wrap_host_command(command: List[str]) -> List[str]:
+    """
+    Wrap a command with flatpak-spawn --host if running inside Flatpak.
+
+    When running inside a Flatpak sandbox, commands that need to execute
+    on the host system (like ClamAV binaries) must be prefixed with
+    'flatpak-spawn --host' to bridge the sandbox boundary.
+
+    Args:
+        command: The command to wrap as a list of strings
+                 (e.g., ['clamscan', '--version'])
+
+    Returns:
+        The original command if not in Flatpak, or the command prefixed
+        with ['flatpak-spawn', '--host'] if running in Flatpak sandbox
+
+    Example:
+        >>> wrap_host_command(['clamscan', '--version'])
+        ['clamscan', '--version']  # When not in Flatpak
+
+        >>> wrap_host_command(['clamscan', '--version'])
+        ['flatpak-spawn', '--host', 'clamscan', '--version']  # When in Flatpak
+    """
+    if not command:
+        return command
+
+    if is_flatpak():
+        return ['flatpak-spawn', '--host'] + list(command)
+
+    return list(command)
+
+
+def which_host_command(binary: str) -> Optional[str]:
+    """
+    Find binary path, checking host system if running in Flatpak.
+
+    When running inside a Flatpak sandbox, shutil.which() only searches
+    the sandbox's PATH. This function uses 'flatpak-spawn --host which'
+    to check the host system's PATH instead.
+
+    Args:
+        binary: The name of the binary to find (e.g., 'clamscan')
+
+    Returns:
+        The full path to the binary if found, None otherwise
+    """
+    if is_flatpak():
+        try:
+            result = subprocess.run(
+                ['flatpak-spawn', '--host', 'which', binary],
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+            if result.returncode == 0:
+                return result.stdout.strip()
+            return None
+        except Exception:
+            return None
+    return shutil.which(binary)
+
+
 def check_clamav_installed() -> Tuple[bool, Optional[str]]:
     """
     Check if ClamAV (clamscan) is installed and accessible.
@@ -19,8 +105,8 @@ def check_clamav_installed() -> Tuple[bool, Optional[str]]:
         - (True, version_string) if ClamAV is installed
         - (False, error_message) if ClamAV is not found or inaccessible
     """
-    # First check if clamscan exists in PATH
-    clamscan_path = shutil.which("clamscan")
+    # First check if clamscan exists in PATH (checking host if in Flatpak)
+    clamscan_path = which_host_command("clamscan")
 
     if clamscan_path is None:
         return (False, "ClamAV is not installed. Please install it with: sudo apt install clamav")
@@ -28,7 +114,7 @@ def check_clamav_installed() -> Tuple[bool, Optional[str]]:
     # Try to get version to verify it's working
     try:
         result = subprocess.run(
-            ["clamscan", "--version"],
+            wrap_host_command(["clamscan", "--version"]),
             capture_output=True,
             text=True,
             timeout=10
@@ -59,8 +145,8 @@ def check_freshclam_installed() -> Tuple[bool, Optional[str]]:
         - (True, version_string) if freshclam is installed
         - (False, error_message) if freshclam is not found or inaccessible
     """
-    # First check if freshclam exists in PATH
-    freshclam_path = shutil.which("freshclam")
+    # First check if freshclam exists in PATH (checking host if in Flatpak)
+    freshclam_path = which_host_command("freshclam")
 
     if freshclam_path is None:
         return (False, "freshclam is not installed. Please install it with: sudo apt install clamav-freshclam")
@@ -68,7 +154,7 @@ def check_freshclam_installed() -> Tuple[bool, Optional[str]]:
     # Try to get version to verify it's working
     try:
         result = subprocess.run(
-            ["freshclam", "--version"],
+            wrap_host_command(["freshclam", "--version"]),
             capture_output=True,
             text=True,
             timeout=10
@@ -99,8 +185,8 @@ def check_clamdscan_installed() -> Tuple[bool, Optional[str]]:
         - (True, version_string) if clamdscan is installed
         - (False, error_message) if clamdscan is not found or inaccessible
     """
-    # First check if clamdscan exists in PATH
-    clamdscan_path = shutil.which("clamdscan")
+    # First check if clamdscan exists in PATH (checking host if in Flatpak)
+    clamdscan_path = which_host_command("clamdscan")
 
     if clamdscan_path is None:
         return (False, "clamdscan is not installed. Please install it with: sudo apt install clamav-daemon")
@@ -108,7 +194,7 @@ def check_clamdscan_installed() -> Tuple[bool, Optional[str]]:
     # Try to get version to verify it's working
     try:
         result = subprocess.run(
-            ["clamdscan", "--version"],
+            wrap_host_command(["clamdscan", "--version"]),
             capture_output=True,
             text=True,
             timeout=10
@@ -234,7 +320,7 @@ def get_clamav_path() -> Optional[str]:
     Returns:
         The full path to clamscan if found, None otherwise
     """
-    return shutil.which("clamscan")
+    return which_host_command("clamscan")
 
 
 def get_freshclam_path() -> Optional[str]:
@@ -244,7 +330,7 @@ def get_freshclam_path() -> Optional[str]:
     Returns:
         The full path to freshclam if found, None otherwise
     """
-    return shutil.which("freshclam")
+    return which_host_command("freshclam")
 
 
 def format_scan_path(path: str) -> str:

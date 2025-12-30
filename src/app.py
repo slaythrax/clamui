@@ -13,7 +13,7 @@ from .ui.scan_view import ScanView
 from .ui.update_view import UpdateView
 from .ui.logs_view import LogsView
 from .ui.components_view import ComponentsView
-from .ui.preferences_dialog import PreferencesDialog
+from .ui.preferences_window import PreferencesWindow
 from .core.settings_manager import SettingsManager
 from .core.notification_manager import NotificationManager
 
@@ -151,6 +151,13 @@ class ClamUIApp(Adw.Application):
         """Handle quit action."""
         self.quit()
 
+    def _on_preferences(self, action, param):
+        """Handle preferences action - show preferences window."""
+        win = self.props.active_window
+        if win:
+            preferences = PreferencesWindow(transient_for=win, settings_manager=self._settings_manager)
+            preferences.present()
+
     def _on_show_scan(self, action, param):
         """Handle show-scan action - switch to scan view."""
         if self._current_view == "scan":
@@ -194,11 +201,6 @@ class ClamUIApp(Adw.Application):
             win.set_content_view(self._components_view)
             win.set_active_view("components")
             self._current_view = "components"
-
-    def _on_preferences(self, action, param):
-        """Handle preferences action - show preferences dialog."""
-        dialog = PreferencesDialog(settings_manager=self._settings_manager)
-        dialog.present(self.props.active_window)
 
     def _on_about(self, action, param):
         """Handle about action - show about dialog."""
