@@ -23,6 +23,10 @@ from gi.repository import Gtk as Gtk3
 logger = logging.getLogger(__name__)
 
 
+# Default icon size for theme lookups (standard symbolic icon size)
+_ICON_SIZE = 24
+
+
 class TrayIndicator:
     """
     Manager for system tray indicator.
@@ -33,6 +37,7 @@ class TrayIndicator:
     """
 
     # Icon mapping for different protection states
+    # Each status has a primary icon that should be used
     ICON_MAP = {
         "protected": "security-high-symbolic",
         "warning": "dialog-warning-symbolic",
@@ -40,7 +45,36 @@ class TrayIndicator:
         "threat": "dialog-error-symbolic",
     }
 
-    # Default fallback icon if custom icon not found
+    # Fallback chains for each status if primary icon not found in theme
+    # Each list is ordered by preference: custom app icon -> theme icon -> generic fallback
+    ICON_FALLBACKS = {
+        "protected": [
+            "clamui-protected-symbolic",  # Custom ClamUI icon (if installed)
+            "security-high-symbolic",  # Standard security icon
+            "emblem-ok-symbolic",  # Generic OK indicator
+            "emblem-default-symbolic",  # Very generic fallback
+        ],
+        "warning": [
+            "clamui-warning-symbolic",  # Custom ClamUI icon (if installed)
+            "dialog-warning-symbolic",  # Standard warning icon
+            "emblem-important-symbolic",  # Alternative warning
+            "dialog-information-symbolic",  # Generic info fallback
+        ],
+        "scanning": [
+            "clamui-scanning-symbolic",  # Custom ClamUI icon (if installed)
+            "emblem-synchronizing-symbolic",  # Standard sync icon
+            "process-working-symbolic",  # Alternative sync/working
+            "view-refresh-symbolic",  # Generic refresh fallback
+        ],
+        "threat": [
+            "clamui-threat-symbolic",  # Custom ClamUI icon (if installed)
+            "dialog-error-symbolic",  # Standard error icon
+            "emblem-unreadable-symbolic",  # Alternative danger icon
+            "security-low-symbolic",  # Security-related fallback
+        ],
+    }
+
+    # Ultimate fallback icon if no icons in chain are found
     DEFAULT_ICON = "security-high-symbolic"
 
     # Application indicator ID
@@ -56,17 +90,94 @@ class TrayIndicator:
         self._indicator: Optional[AppIndicator.Indicator] = None
         self._menu: Optional[Gtk3.Menu] = None
         self._current_status: str = "protected"
+        self._icon_theme: Optional[Gtk3.IconTheme] = None
 
         # Create the indicator
         self._create_indicator()
 
+    def _get_icon_theme(self) -> Gtk3.IconTheme:
+        """
+        Get the current GTK icon theme.
+
+        Caches the icon theme instance for efficiency.
+
+        Returns:
+            The current Gtk3.IconTheme instance
+        """
+        if self._icon_theme is None:
+            self._icon_theme = Gtk3.IconTheme.get_default()
+        return self._icon_theme
+
+    def _icon_exists(self, icon_name: str) -> bool:
+        """
+        Check if an icon exists in the current theme.
+
+        Args:
+            icon_name: Name of the icon to check
+
+        Returns:
+            True if icon exists in theme, False otherwise
+        """
+        theme = self._get_icon_theme()
+        return theme.has_icon(icon_name)
+
+    def _resolve_icon(self, status: str) -> str:
+        """
+        Resolve the best available icon for a given status.
+
+        Walks through the fallback chain for the status and returns
+        the first icon that exists in the current theme. If no icons
+        in the chain are found, returns the DEFAULT_ICON.
+
+        Args:
+            status: Protection status ('protected', 'warning', 'scanning', 'threat')
+
+        Returns:
+            Icon name that exists in the current theme
+        """
+        # Get fallback chain for this status
+        fallback_chain = self.ICON_FALLBACKS.get(status, [])
+
+        # Check each icon in the fallback chain
+        for icon_name in fallback_chain:
+            if self._icon_exists(icon_name):
+                if icon_name != fallback_chain[0]:
+                    logger.debug(
+                        f"Using fallback icon '{icon_name}' for status '{status}'"
+                    )
+                return icon_name
+
+        # If no icons in chain found, use the direct ICON_MAP value
+        primary_icon = self.ICON_MAP.get(status, self.DEFAULT_ICON)
+        if self._icon_exists(primary_icon):
+            return primary_icon
+
+        # Ultimate fallback
+        if self._icon_exists(self.DEFAULT_ICON):
+            logger.warning(
+                f"No icons found for status '{status}', using default '{self.DEFAULT_ICON}'"
+            )
+            return self.DEFAULT_ICON
+
+        # If even DEFAULT_ICON doesn't exist, return it anyway
+        # (AppIndicator will handle missing icon gracefully)
+        logger.warning(
+            f"Default icon '{self.DEFAULT_ICON}' not found in theme, icon may not display"
+        )
+        return self.DEFAULT_ICON
+
     def _create_indicator(self) -> None:
         """
         Create and configure the AppIndicator instance.
+
+        Uses fallback logic to find the best available icon for initial state.
         """
+        # Resolve initial icon with fallback support
+        initial_icon = self._resolve_icon(self._current_status)
+
         self._indicator = AppIndicator.Indicator.new(
             self.INDICATOR_ID,
-            self.DEFAULT_ICON,
+            initial_icon,
             AppIndicator.IndicatorCategory.APPLICATION_STATUS,
         )
 
@@ -76,6 +187,7 @@ class TrayIndicator:
 
         # Set tooltip/title
         self._indicator.set_title("ClamUI")
+        logger.debug(f"Tray indicator created with icon: {initial_icon}")
 
     def _build_menu(self) -> Gtk3.Menu:
         """
@@ -130,18 +242,28 @@ class TrayIndicator:
         """
         Update the tray icon based on protection status.
 
+        Uses fallback logic to find the best available icon for the status.
+        If the requested status has no available icons, falls back to
+        the default icon (security-high-symbolic).
+
         Args:
             status: One of 'protected', 'warning', 'scanning', 'threat'
         """
         if self._indicator is None:
             return
 
-        icon_name = self.ICON_MAP.get(status, self.DEFAULT_ICON)
+        # Validate status and use fallback for unknown values
+        if status not in self.ICON_MAP:
+            logger.warning(f"Unknown status '{status}', using 'protected'")
+            status = "protected"
+
+        # Resolve the best available icon with fallback
+        icon_name = self._resolve_icon(status)
         tooltip = f"ClamUI - {status.capitalize()}"
 
         self._indicator.set_icon_full(icon_name, tooltip)
         self._current_status = status
-        logger.debug(f"Tray status updated to: {status}")
+        logger.debug(f"Tray status updated to: {status} (icon: {icon_name})")
 
     def update_scan_progress(self, percentage: int) -> None:
         """
@@ -171,6 +293,7 @@ class TrayIndicator:
         self.deactivate()
         self._menu = None
         self._indicator = None
+        self._icon_theme = None
         logger.debug("Tray indicator cleaned up")
 
     @property
