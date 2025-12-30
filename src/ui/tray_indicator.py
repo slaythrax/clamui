@@ -8,9 +8,47 @@ while the main application uses GTK4. GTK3 code is isolated to this module.
 """
 
 import logging
+import os
+from pathlib import Path
 from typing import Callable, Optional
 
 logger = logging.getLogger(__name__)
+
+
+def _find_clamui_icon() -> Optional[str]:
+    """
+    Find the ClamUI application icon.
+
+    Searches in common locations for the icon file.
+
+    Returns:
+        Absolute path to the icon file, or None if not found
+    """
+    # Possible icon filenames
+    icon_names = ["com.github.clamui.svg", "com.github.rooki.ClamUI.svg"]
+
+    # Search paths relative to this module
+    module_dir = Path(__file__).parent
+    search_paths = [
+        module_dir.parent.parent / "icons",  # src/../icons (development)
+        Path("/usr/share/icons/hicolor/scalable/apps"),  # System-wide
+        Path("/usr/local/share/icons/hicolor/scalable/apps"),
+        Path.home() / ".local/share/icons/hicolor/scalable/apps",
+    ]
+
+    for search_path in search_paths:
+        for icon_name in icon_names:
+            icon_path = search_path / icon_name
+            if icon_path.exists():
+                logger.debug(f"Found ClamUI icon at: {icon_path}")
+                return str(icon_path.absolute())
+
+    logger.debug("ClamUI icon not found, will use theme fallbacks")
+    return None
+
+
+# Cache the icon path
+_CLAMUI_ICON_PATH: Optional[str] = None
 
 # Track availability of AppIndicator library
 _APPINDICATOR_AVAILABLE = False
@@ -232,24 +270,50 @@ class TrayIndicator:
         )
         return self.DEFAULT_ICON
 
+    def _get_clamui_icon(self) -> Optional[str]:
+        """
+        Get the ClamUI application icon path.
+
+        Uses cached path or finds the icon on first call.
+
+        Returns:
+            Absolute path to the ClamUI icon, or None if not found
+        """
+        global _CLAMUI_ICON_PATH
+        if _CLAMUI_ICON_PATH is None:
+            _CLAMUI_ICON_PATH = _find_clamui_icon()
+        return _CLAMUI_ICON_PATH
+
     def _create_indicator(self) -> None:
         """
         Create and configure the AppIndicator instance.
 
-        Uses fallback logic to find the best available icon for initial state.
+        Uses the ClamUI application icon if found, otherwise falls back
+        to theme icons.
         Does nothing if AppIndicator library is not available.
         """
         if not self._available:
             return
 
-        # Resolve initial icon with fallback support
-        initial_icon = self._resolve_icon(self._current_status)
+        # Try to use the ClamUI icon first, fall back to theme icon
+        clamui_icon = self._get_clamui_icon()
+        if clamui_icon:
+            initial_icon = clamui_icon
+            logger.info(f"Using ClamUI icon: {clamui_icon}")
+        else:
+            initial_icon = self._resolve_icon(self._current_status)
+            logger.info(f"Using theme icon: {initial_icon}")
 
         self._indicator = AppIndicator.Indicator.new(
             self.INDICATOR_ID,
             initial_icon,
             AppIndicator.IndicatorCategory.APPLICATION_STATUS,
         )
+
+        # If using a file path, set the icon theme path for AppIndicator
+        if clamui_icon:
+            icon_dir = str(Path(clamui_icon).parent)
+            self._indicator.set_icon_theme_path(icon_dir)
 
         # Build initial menu (required before activating)
         self._menu = self._build_menu()
@@ -417,9 +481,8 @@ class TrayIndicator:
         """
         Update the tray icon based on protection status.
 
-        Uses fallback logic to find the best available icon for the status.
-        If the requested status has no available icons, falls back to
-        the default icon (security-high-symbolic).
+        Uses the ClamUI application icon if available, otherwise falls back
+        to theme icons for the status.
 
         Args:
             status: One of 'protected', 'warning', 'scanning', 'threat'
@@ -432,11 +495,19 @@ class TrayIndicator:
             logger.warning(f"Unknown status '{status}', using 'protected'")
             status = "protected"
 
-        # Resolve the best available icon with fallback
-        icon_name = self._resolve_icon(status)
         tooltip = f"ClamUI - {status.capitalize()}"
 
-        self._indicator.set_icon_full(icon_name, tooltip)
+        # Use ClamUI icon if available, otherwise use theme icon
+        clamui_icon = self._get_clamui_icon()
+        if clamui_icon:
+            # Use the ClamUI icon - extract icon name without path/extension
+            icon_name = Path(clamui_icon).stem
+            self._indicator.set_icon_full(icon_name, tooltip)
+        else:
+            # Fall back to theme icons
+            icon_name = self._resolve_icon(status)
+            self._indicator.set_icon_full(icon_name, tooltip)
+
         self._current_status = status
         logger.debug(f"Tray status updated to: {status} (icon: {icon_name})")
 
