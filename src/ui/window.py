@@ -291,6 +291,7 @@ class MainWindow(Adw.ApplicationWindow):
             self._logs_button.set_active(False)
             self._components_button.set_active(True)
             self._quarantine_button.set_active(False)
+            self._statistics_button.set_active(False)
         elif view_name == "quarantine":
             self._scan_button.set_active(False)
             self._database_button.set_active(False)
@@ -304,6 +305,7 @@ class MainWindow(Adw.ApplicationWindow):
             self._logs_button.set_active(False)
             self._components_button.set_active(False)
             self._statistics_button.set_active(True)
+            self._quarantine_button.set_active(False)
 
     def _create_menu_button(self) -> Gtk.MenuButton:
         """
