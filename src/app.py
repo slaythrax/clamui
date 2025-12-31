@@ -5,6 +5,7 @@ Main Adwaita Application class for ClamUI.
 
 import logging
 import os
+from pathlib import Path
 
 import gi
 gi.require_version('Gtk', '4.0')
@@ -19,6 +20,7 @@ from .ui.components_view import ComponentsView
 from .ui.preferences_window import PreferencesWindow
 from .core.settings_manager import SettingsManager
 from .core.notification_manager import NotificationManager
+from .profiles.profile_manager import ProfileManager
 
 # Tray manager - uses subprocess to avoid GTK3/GTK4 version conflict
 from .ui.tray_manager import TrayManager
@@ -49,6 +51,12 @@ class ClamUIApp(Adw.Application):
         # Settings and notification management
         self._settings_manager = SettingsManager()
         self._notification_manager = NotificationManager(self._settings_manager)
+
+        # Profile management
+        # Use XDG config directory (same location as settings)
+        xdg_config_home = os.environ.get("XDG_CONFIG_HOME", "~/.config")
+        config_dir = Path(xdg_config_home).expanduser() / "clamui"
+        self._profile_manager = ProfileManager(config_dir)
 
         # View management
         self._scan_view = None
@@ -82,6 +90,11 @@ class ClamUIApp(Adw.Application):
     def settings_manager(self) -> SettingsManager:
         """Get the settings manager instance."""
         return self._settings_manager
+
+    @property
+    def profile_manager(self) -> ProfileManager:
+        """Get the profile manager instance."""
+        return self._profile_manager
 
     @property
     def tray_indicator(self):
