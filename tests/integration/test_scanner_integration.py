@@ -356,3 +356,407 @@ Infected files: 4
 
         assert threat_map["Eicar-Test-Signature"].severity == "low"
         assert threat_map["Eicar-Test-Signature"].category == "Test"
+
+
+@pytest.mark.integration
+class TestScannerAsyncWorkflow:
+    """Integration tests for the asynchronous scan workflow with callback verification."""
+
+    def test_scanner_async_workflow(self, tmp_path):
+        """
+        Test async scan workflow with callback verification.
+
+        This test verifies the full scan_async workflow:
+        1. Create a test file to scan
+        2. Execute scan_async with mocked subprocess
+        3. Verify callback is invoked with ScanResult
+        4. Verify GLib.idle_add is used to schedule callback on main thread
+        5. Verify all ScanResult properties are correctly populated
+        """
+        import threading
+        import time
+
+        # Step 1: Create test file (simulates file selection)
+        test_file = tmp_path / "test_async_document.txt"
+        test_file.write_text("This is a test document for async scanning.")
+
+        scanner = Scanner()
+
+        # Step 2: Mock ClamAV subprocess execution
+        mock_stdout = f"""
+{test_file}: OK
+
+----------- SCAN SUMMARY -----------
+Known viruses: 8000000
+Engine version: 1.2.3
+Scanned directories: 0
+Scanned files: 1
+Infected files: 0
+Data scanned: 0.01 MB
+Data read: 0.01 MB
+Time: 0.100 sec (0 m 0 s)
+"""
+
+        # Track callback invocation
+        callback_results = []
+        callback_event = threading.Event()
+
+        def test_callback(result: ScanResult):
+            """Callback to capture scan result."""
+            callback_results.append(result)
+            callback_event.set()
+
+        # Track GLib.idle_add calls to verify main thread scheduling
+        glib_idle_add_calls = []
+
+        def mock_glib_idle_add(callback_func, *args):
+            """Mock GLib.idle_add to capture and immediately invoke callback."""
+            glib_idle_add_calls.append((callback_func, args))
+            # Immediately invoke the callback (simulates GTK main loop)
+            return callback_func(*args)
+
+        with mock.patch("src.core.scanner.get_clamav_path", return_value="/usr/bin/clamscan"):
+            with mock.patch("src.core.scanner.wrap_host_command", side_effect=lambda x: x):
+                with mock.patch("src.core.scanner.check_clamav_installed", return_value=(True, "1.2.3")):
+                    with mock.patch("subprocess.Popen") as mock_popen:
+                        mock_process = mock.MagicMock()
+                        mock_process.communicate.return_value = (mock_stdout, "")
+                        mock_process.returncode = 0
+                        mock_popen.return_value = mock_process
+
+                        # Mock GLib.idle_add in the scanner module
+                        with mock.patch("src.core.scanner.GLib.idle_add", side_effect=mock_glib_idle_add):
+                            # Step 3: Execute async scan
+                            scanner.scan_async(str(test_file), test_callback)
+
+                            # Wait for callback to be invoked (with timeout)
+                            callback_received = callback_event.wait(timeout=5.0)
+
+        # Step 4: Verify callback was invoked
+        assert callback_received, "Callback was not invoked within timeout"
+        assert len(callback_results) == 1, "Callback should be invoked exactly once"
+
+        # Verify GLib.idle_add was used for main thread scheduling
+        assert len(glib_idle_add_calls) == 1, "GLib.idle_add should be called once"
+        idle_callback, idle_args = glib_idle_add_calls[0]
+        assert idle_callback == test_callback, "GLib.idle_add should schedule our callback"
+
+        # Step 5: Verify ScanResult structure
+        result = callback_results[0]
+        assert isinstance(result, ScanResult)
+        assert result.status == ScanStatus.CLEAN
+        assert result.path == str(test_file)
+        assert result.exit_code == 0
+
+        # Verify properties
+        assert result.is_clean is True
+        assert result.has_threats is False
+
+        # Verify counts
+        assert result.infected_count == 0
+        assert result.scanned_files == 1
+        assert len(result.infected_files) == 0
+        assert len(result.threat_details) == 0
+
+        # Verify error handling
+        assert result.error_message is None
+
+    def test_scanner_async_workflow_with_infected_file(self, tmp_path):
+        """
+        Test async scan workflow with infected file detection.
+
+        Verifies that async scan correctly:
+        1. Detects infected files
+        2. Invokes callback with INFECTED status
+        3. Populates threat_details with correct classification
+        """
+        import threading
+
+        test_file = tmp_path / "infected_async.exe"
+        test_file.write_text("simulated infected content")
+
+        scanner = Scanner()
+
+        mock_stdout = f"""
+{test_file}: Win.Trojan.Agent FOUND
+
+----------- SCAN SUMMARY -----------
+Scanned directories: 0
+Scanned files: 1
+Infected files: 1
+Data scanned: 0.01 MB
+Time: 0.100 sec (0 m 0 s)
+"""
+
+        callback_results = []
+        callback_event = threading.Event()
+
+        def test_callback(result: ScanResult):
+            callback_results.append(result)
+            callback_event.set()
+
+        def mock_glib_idle_add(callback_func, *args):
+            return callback_func(*args)
+
+        with mock.patch("src.core.scanner.get_clamav_path", return_value="/usr/bin/clamscan"):
+            with mock.patch("src.core.scanner.wrap_host_command", side_effect=lambda x: x):
+                with mock.patch("src.core.scanner.check_clamav_installed", return_value=(True, "1.2.3")):
+                    with mock.patch("subprocess.Popen") as mock_popen:
+                        mock_process = mock.MagicMock()
+                        mock_process.communicate.return_value = (mock_stdout, "")
+                        mock_process.returncode = 1  # ClamAV exit code 1 = virus found
+                        mock_popen.return_value = mock_process
+
+                        with mock.patch("src.core.scanner.GLib.idle_add", side_effect=mock_glib_idle_add):
+                            scanner.scan_async(str(test_file), test_callback)
+                            callback_received = callback_event.wait(timeout=5.0)
+
+        assert callback_received, "Callback was not invoked within timeout"
+
+        result = callback_results[0]
+        assert result.status == ScanStatus.INFECTED
+        assert result.is_clean is False
+        assert result.has_threats is True
+
+        # Verify threat details
+        assert len(result.threat_details) == 1
+        threat = result.threat_details[0]
+        assert isinstance(threat, ThreatDetail)
+        assert threat.file_path == str(test_file)
+        assert threat.threat_name == "Win.Trojan.Agent"
+        assert threat.category == "Trojan"
+        assert threat.severity == "high"
+
+    def test_scanner_async_workflow_callback_receives_error(self, tmp_path):
+        """
+        Test async scan workflow error handling via callback.
+
+        Verifies that errors are properly propagated to the callback.
+        """
+        import threading
+
+        test_file = tmp_path / "test.txt"
+        test_file.write_text("test content")
+
+        scanner = Scanner()
+
+        mock_stderr = "ERROR: Can't open database file"
+
+        callback_results = []
+        callback_event = threading.Event()
+
+        def test_callback(result: ScanResult):
+            callback_results.append(result)
+            callback_event.set()
+
+        def mock_glib_idle_add(callback_func, *args):
+            return callback_func(*args)
+
+        with mock.patch("src.core.scanner.get_clamav_path", return_value="/usr/bin/clamscan"):
+            with mock.patch("src.core.scanner.wrap_host_command", side_effect=lambda x: x):
+                with mock.patch("src.core.scanner.check_clamav_installed", return_value=(True, "1.2.3")):
+                    with mock.patch("subprocess.Popen") as mock_popen:
+                        mock_process = mock.MagicMock()
+                        mock_process.communicate.return_value = ("", mock_stderr)
+                        mock_process.returncode = 2  # ClamAV exit code 2 = error
+                        mock_popen.return_value = mock_process
+
+                        with mock.patch("src.core.scanner.GLib.idle_add", side_effect=mock_glib_idle_add):
+                            scanner.scan_async(str(test_file), test_callback)
+                            callback_received = callback_event.wait(timeout=5.0)
+
+        assert callback_received, "Callback was not invoked within timeout"
+
+        result = callback_results[0]
+        assert result.status == ScanStatus.ERROR
+        assert result.exit_code == 2
+        assert result.error_message is not None
+
+    def test_scanner_async_workflow_runs_in_background_thread(self, tmp_path):
+        """
+        Test that async scan runs in a background thread (non-blocking).
+
+        Verifies that scan_async returns immediately and scan executes in background.
+        """
+        import threading
+        import time
+
+        test_file = tmp_path / "test.txt"
+        test_file.write_text("test content")
+
+        scanner = Scanner()
+
+        mock_stdout = f"{test_file}: OK\n"
+
+        callback_results = []
+        callback_event = threading.Event()
+        scan_thread_ids = []
+        main_thread_id = threading.current_thread().ident
+
+        def test_callback(result: ScanResult):
+            callback_results.append(result)
+            callback_event.set()
+
+        def mock_glib_idle_add(callback_func, *args):
+            return callback_func(*args)
+
+        def mock_communicate():
+            # Record the thread ID where scan executes
+            scan_thread_ids.append(threading.current_thread().ident)
+            return (mock_stdout, "")
+
+        with mock.patch("src.core.scanner.get_clamav_path", return_value="/usr/bin/clamscan"):
+            with mock.patch("src.core.scanner.wrap_host_command", side_effect=lambda x: x):
+                with mock.patch("src.core.scanner.check_clamav_installed", return_value=(True, "1.2.3")):
+                    with mock.patch("subprocess.Popen") as mock_popen:
+                        mock_process = mock.MagicMock()
+                        mock_process.communicate.side_effect = mock_communicate
+                        mock_process.returncode = 0
+                        mock_popen.return_value = mock_process
+
+                        with mock.patch("src.core.scanner.GLib.idle_add", side_effect=mock_glib_idle_add):
+                            # Record time before calling scan_async
+                            start_time = time.monotonic()
+
+                            # Call scan_async - should return immediately
+                            scanner.scan_async(str(test_file), test_callback)
+
+                            # Should return immediately (non-blocking)
+                            elapsed = time.monotonic() - start_time
+
+                            # Wait for callback
+                            callback_event.wait(timeout=5.0)
+
+        # Verify scan_async returned quickly (non-blocking)
+        assert elapsed < 0.5, f"scan_async took {elapsed}s, should be non-blocking"
+
+        # Verify scan executed in a different thread than main
+        assert len(scan_thread_ids) == 1
+        assert scan_thread_ids[0] != main_thread_id, "Scan should run in background thread"
+
+    def test_scanner_async_workflow_with_recursive_directory(self, tmp_path):
+        """
+        Test async scan workflow with recursive directory scanning.
+
+        Verifies that async scan correctly handles directory scans.
+        """
+        import threading
+
+        # Create directory with multiple files
+        scan_dir = tmp_path / "async_documents"
+        scan_dir.mkdir()
+        (scan_dir / "file1.txt").write_text("Clean file 1")
+        (scan_dir / "file2.txt").write_text("Clean file 2")
+        (scan_dir / "file3.txt").write_text("Clean file 3")
+
+        scanner = Scanner()
+
+        mock_stdout = f"""
+{scan_dir}/file1.txt: OK
+{scan_dir}/file2.txt: OK
+{scan_dir}/file3.txt: OK
+
+----------- SCAN SUMMARY -----------
+Scanned directories: 1
+Scanned files: 3
+Infected files: 0
+Data scanned: 0.01 MB
+Time: 0.200 sec (0 m 0 s)
+"""
+
+        callback_results = []
+        callback_event = threading.Event()
+
+        def test_callback(result: ScanResult):
+            callback_results.append(result)
+            callback_event.set()
+
+        def mock_glib_idle_add(callback_func, *args):
+            return callback_func(*args)
+
+        with mock.patch("src.core.scanner.get_clamav_path", return_value="/usr/bin/clamscan"):
+            with mock.patch("src.core.scanner.wrap_host_command", side_effect=lambda x: x):
+                with mock.patch("src.core.scanner.check_clamav_installed", return_value=(True, "1.2.3")):
+                    with mock.patch("subprocess.Popen") as mock_popen:
+                        mock_process = mock.MagicMock()
+                        mock_process.communicate.return_value = (mock_stdout, "")
+                        mock_process.returncode = 0
+                        mock_popen.return_value = mock_process
+
+                        with mock.patch("src.core.scanner.GLib.idle_add", side_effect=mock_glib_idle_add):
+                            # Scan directory with recursive=True
+                            scanner.scan_async(str(scan_dir), test_callback, recursive=True)
+                            callback_received = callback_event.wait(timeout=5.0)
+
+        assert callback_received, "Callback was not invoked within timeout"
+
+        result = callback_results[0]
+        assert result.status == ScanStatus.CLEAN
+        assert result.is_clean is True
+        assert result.scanned_files == 3
+        assert result.scanned_dirs == 1
+
+    def test_scanner_async_workflow_multiple_threats(self, tmp_path):
+        """
+        Test async scan workflow with multiple threat detection.
+
+        Verifies that async scan correctly handles multiple threats
+        with varying severity levels.
+        """
+        import threading
+
+        scan_dir = tmp_path / "infected_dir"
+        scan_dir.mkdir()
+
+        scanner = Scanner()
+
+        mock_stdout = f"""
+{scan_dir}/critical.exe: Ransomware.Locky FOUND
+{scan_dir}/high.exe: Trojan.Banker FOUND
+{scan_dir}/medium.exe: Adware.Toolbar FOUND
+{scan_dir}/low.exe: Eicar-Test-Signature FOUND
+
+----------- SCAN SUMMARY -----------
+Scanned directories: 1
+Scanned files: 4
+Infected files: 4
+"""
+
+        callback_results = []
+        callback_event = threading.Event()
+
+        def test_callback(result: ScanResult):
+            callback_results.append(result)
+            callback_event.set()
+
+        def mock_glib_idle_add(callback_func, *args):
+            return callback_func(*args)
+
+        with mock.patch("src.core.scanner.get_clamav_path", return_value="/usr/bin/clamscan"):
+            with mock.patch("src.core.scanner.wrap_host_command", side_effect=lambda x: x):
+                with mock.patch("src.core.scanner.check_clamav_installed", return_value=(True, "1.2.3")):
+                    with mock.patch("subprocess.Popen") as mock_popen:
+                        mock_process = mock.MagicMock()
+                        mock_process.communicate.return_value = (mock_stdout, "")
+                        mock_process.returncode = 1
+                        mock_popen.return_value = mock_process
+
+                        with mock.patch("src.core.scanner.GLib.idle_add", side_effect=mock_glib_idle_add):
+                            scanner.scan_async(str(scan_dir), test_callback, recursive=True)
+                            callback_received = callback_event.wait(timeout=5.0)
+
+        assert callback_received, "Callback was not invoked within timeout"
+
+        result = callback_results[0]
+        assert result.status == ScanStatus.INFECTED
+        assert result.infected_count == 4
+        assert len(result.threat_details) == 4
+
+        # Build a map for easy verification
+        threat_map = {t.threat_name: t for t in result.threat_details}
+
+        # Verify severity classification
+        assert threat_map["Ransomware.Locky"].severity == "critical"
+        assert threat_map["Trojan.Banker"].severity == "high"
+        assert threat_map["Adware.Toolbar"].severity == "medium"
+        assert threat_map["Eicar-Test-Signature"].severity == "low"
