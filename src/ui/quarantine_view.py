@@ -9,6 +9,7 @@ Provides the quarantine management interface with:
 - Cleanup for old entries
 """
 
+import time
 from datetime import datetime
 
 import gi
@@ -80,8 +81,17 @@ class QuarantineView(Gtk.Box):
         self._all_entries: list[QuarantineEntry] = []
         self._load_more_row: Gtk.Box | None = None
 
+        # Callback for quarantine content changes (for external notification)
+        self._on_quarantine_changed = None
+
+        # Track last refresh time to prevent excessive refreshes
+        self._last_refresh_time: float = 0.0
+
         # Set up the UI
         self._setup_ui()
+
+        # Connect to map signal to refresh when view becomes visible
+        self.connect("map", self._on_view_mapped)
 
         # Load entries on startup asynchronously
         GLib.idle_add(self._load_entries_async)
@@ -287,6 +297,9 @@ class QuarantineView(Gtk.Box):
             # Update storage info
             self._update_storage_info()
 
+            # Update last refresh time to prevent duplicate refreshes
+            self._last_refresh_time = time.time()
+
             # Handle empty state - placeholder will be shown automatically
             if not entries:
                 self._clear_old_button.set_sensitive(False)
@@ -305,6 +318,11 @@ class QuarantineView(Gtk.Box):
 
         finally:
             self._set_loading_state(False)
+
+            # Invoke callback if registered
+            if self._on_quarantine_changed:
+                entry_count = len(entries)
+                self._on_quarantine_changed(entry_count)
 
         return False
 
@@ -780,3 +798,55 @@ class QuarantineView(Gtk.Box):
             The QuarantineManager instance used by this view
         """
         return self._manager
+
+    def _on_view_mapped(self, widget):
+        """
+        Handle view becoming visible (mapped).
+
+        Refreshes the quarantine list when the view becomes visible to ensure
+        newly quarantined files appear immediately without manual refresh.
+        Uses a debounce mechanism to prevent excessive refreshes.
+
+        Args:
+            widget: The widget that was mapped (self)
+        """
+        # Debounce: only refresh if more than 0.5 seconds since last refresh
+        # This prevents excessive refreshes when rapidly switching tabs
+        current_time = time.time()
+        if current_time - self._last_refresh_time < 0.5:
+            return
+
+        self._last_refresh_time = current_time
+
+        # Trigger async refresh
+        self._load_entries_async()
+
+    def set_quarantine_changed_callback(self, callback):
+        """
+        Set callback for quarantine content changes.
+
+        The callback is invoked when quarantine operations complete
+        (file added, restored, or deleted). This allows external code
+        to react to quarantine changes.
+
+        Signature: callback(entry_count: int)
+        - entry_count: Current number of entries in quarantine
+
+        Args:
+            callback: Callable to invoke on quarantine changes
+        """
+        self._on_quarantine_changed = callback
+
+    def notify_quarantine_changed(self):
+        """
+        Notify that quarantine content has changed.
+
+        Call this method when files are added to quarantine from external
+        code (e.g., scan view) to trigger a refresh of the quarantine list.
+        """
+        self.refresh()
+
+        # Invoke callback if registered
+        if self._on_quarantine_changed:
+            entry_count = self._manager.get_entry_count()
+            self._on_quarantine_changed(entry_count)
