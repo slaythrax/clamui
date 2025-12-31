@@ -14,6 +14,11 @@ from .models import ScanProfile
 from .profile_storage import ProfileStorage
 
 
+# Validation constants
+MAX_PROFILE_NAME_LENGTH = 50
+MIN_PROFILE_NAME_LENGTH = 1
+
+
 class ProfileManager:
     """
     Manager for scan profile lifecycle and operations.
@@ -150,6 +155,290 @@ class ProfileManager:
         """Get current timestamp in ISO 8601 format."""
         return datetime.now(timezone.utc).isoformat()
 
+    def _validate_name(
+        self, name: str, exclude_id: Optional[str] = None
+    ) -> None:
+        """
+        Validate a profile name.
+
+        Args:
+            name: The profile name to validate
+            exclude_id: Optional profile ID to exclude from uniqueness check
+                       (used when updating an existing profile)
+
+        Raises:
+            ValueError: If name is invalid (empty, too long, or duplicate)
+        """
+        # Check for empty or whitespace-only name
+        if not name or not name.strip():
+            raise ValueError("Profile name cannot be empty")
+
+        stripped_name = name.strip()
+
+        # Check name length
+        if len(stripped_name) < MIN_PROFILE_NAME_LENGTH:
+            raise ValueError("Profile name cannot be empty")
+
+        if len(stripped_name) > MAX_PROFILE_NAME_LENGTH:
+            raise ValueError(
+                f"Profile name cannot exceed {MAX_PROFILE_NAME_LENGTH} characters"
+            )
+
+        # Check for duplicate name
+        if self.name_exists(stripped_name, exclude_id):
+            raise ValueError(f"Profile name '{stripped_name}' already exists")
+
+    def _validate_path_format(self, path: str) -> tuple[bool, Optional[str]]:
+        """
+        Validate a path format.
+
+        Checks that the path is a valid format (not necessarily existing).
+        Allows ~ for home directory and relative/absolute paths.
+
+        Args:
+            path: The path string to validate
+
+        Returns:
+            Tuple of (is_valid, error_message):
+            - (True, None) if path format is valid
+            - (False, error_message) if path format is invalid
+        """
+        if not path or not path.strip():
+            return (False, "Path cannot be empty")
+
+        stripped_path = path.strip()
+
+        # Check for null bytes (security)
+        if "\x00" in stripped_path:
+            return (False, "Path contains invalid characters")
+
+        # Try to parse the path to check for basic validity
+        try:
+            # Expand ~ but don't require existence
+            if stripped_path.startswith("~"):
+                expanded = Path(stripped_path).expanduser()
+            else:
+                expanded = Path(stripped_path)
+
+            # Check that the path string is reasonable
+            # (Path() can accept almost anything, so we do additional checks)
+
+            # Reject paths with consecutive separators (except for // at start on some systems)
+            if "//" in str(expanded)[1:] or "\\\\" in str(expanded):
+                return (False, f"Invalid path format: {path}")
+
+        except (OSError, RuntimeError, ValueError) as e:
+            return (False, f"Invalid path format: {e}")
+
+        return (True, None)
+
+    def _validate_targets(self, targets: list[str]) -> list[str]:
+        """
+        Validate target paths.
+
+        Validates each target path format. Non-existent paths are allowed
+        as they may become valid later.
+
+        Args:
+            targets: List of target paths to validate
+
+        Returns:
+            List of warning messages (empty if no warnings)
+
+        Raises:
+            ValueError: If targets is not a list or contains invalid path formats
+        """
+        warnings: list[str] = []
+
+        # Validate targets is a list
+        if not isinstance(targets, list):
+            raise ValueError("Targets must be a list of paths")
+
+        # Validate each target path format
+        for i, target in enumerate(targets):
+            if not isinstance(target, str):
+                raise ValueError(f"Target at index {i} must be a string")
+
+            is_valid, error = self._validate_path_format(target)
+            if not is_valid:
+                raise ValueError(f"Invalid target path: {error}")
+
+        return warnings
+
+    def _validate_exclusions(
+        self, exclusions: dict[str, Any], targets: list[str]
+    ) -> list[str]:
+        """
+        Validate exclusion settings.
+
+        Validates exclusion structure and path formats. Also checks for
+        circular exclusions (exclusion is parent of all targets).
+
+        Args:
+            exclusions: Dictionary of exclusion settings
+            targets: List of target paths (for circular exclusion check)
+
+        Returns:
+            List of warning messages (empty if no warnings)
+
+        Raises:
+            ValueError: If exclusions structure is invalid or contains invalid paths
+        """
+        warnings: list[str] = []
+
+        # Validate exclusions is a dict
+        if not isinstance(exclusions, dict):
+            raise ValueError("Exclusions must be a dictionary")
+
+        # If exclusions is empty, it's valid
+        if not exclusions:
+            return warnings
+
+        # Validate 'paths' key if present
+        if "paths" in exclusions:
+            paths = exclusions["paths"]
+
+            if not isinstance(paths, list):
+                raise ValueError("Exclusions 'paths' must be a list")
+
+            for i, path in enumerate(paths):
+                if not isinstance(path, str):
+                    raise ValueError(
+                        f"Exclusion path at index {i} must be a string"
+                    )
+
+                is_valid, error = self._validate_path_format(path)
+                if not is_valid:
+                    raise ValueError(f"Invalid exclusion path: {error}")
+
+            # Check for circular exclusions
+            # (exclusion path that would exclude all targets)
+            self._check_circular_exclusions(paths, targets, warnings)
+
+        # Validate 'patterns' key if present (file patterns like *.tmp)
+        if "patterns" in exclusions:
+            patterns = exclusions["patterns"]
+
+            if not isinstance(patterns, list):
+                raise ValueError("Exclusions 'patterns' must be a list")
+
+            for i, pattern in enumerate(patterns):
+                if not isinstance(pattern, str):
+                    raise ValueError(
+                        f"Exclusion pattern at index {i} must be a string"
+                    )
+
+                if not pattern.strip():
+                    raise ValueError("Exclusion pattern cannot be empty")
+
+        return warnings
+
+    def _check_circular_exclusions(
+        self,
+        exclusion_paths: list[str],
+        targets: list[str],
+        warnings: list[str],
+    ) -> None:
+        """
+        Check for circular exclusions where an exclusion would exclude all targets.
+
+        Args:
+            exclusion_paths: List of exclusion paths
+            targets: List of target paths
+            warnings: List to append warning messages to
+        """
+        if not targets or not exclusion_paths:
+            return
+
+        for exclusion in exclusion_paths:
+            # Normalize the exclusion path
+            try:
+                if exclusion.startswith("~"):
+                    excl_path = Path(exclusion).expanduser().resolve()
+                else:
+                    excl_path = Path(exclusion).resolve()
+            except (OSError, RuntimeError, ValueError):
+                continue
+
+            # Check if all targets are children of this exclusion
+            all_excluded = True
+            for target in targets:
+                try:
+                    if target.startswith("~"):
+                        target_path = Path(target).expanduser().resolve()
+                    else:
+                        target_path = Path(target).resolve()
+
+                    # Check if target is the same as or is a child of exclusion
+                    if not (
+                        target_path == excl_path
+                        or self._is_subpath(target_path, excl_path)
+                    ):
+                        all_excluded = False
+                        break
+                except (OSError, RuntimeError, ValueError):
+                    all_excluded = False
+                    break
+
+            if all_excluded and len(targets) > 0:
+                warnings.append(
+                    f"Exclusion '{exclusion}' would exclude all scan targets"
+                )
+
+    def _is_subpath(self, path: Path, parent: Path) -> bool:
+        """
+        Check if path is a subpath of parent.
+
+        Args:
+            path: The path to check
+            parent: The potential parent path
+
+        Returns:
+            True if path is under parent, False otherwise
+        """
+        try:
+            path.relative_to(parent)
+            return True
+        except ValueError:
+            return False
+
+    def _validate_profile(
+        self,
+        name: str,
+        targets: list[str],
+        exclusions: dict[str, Any],
+        exclude_id: Optional[str] = None,
+    ) -> list[str]:
+        """
+        Validate all profile fields.
+
+        Args:
+            name: Profile name
+            targets: List of target paths
+            exclusions: Dictionary of exclusion settings
+            exclude_id: Optional profile ID to exclude from name uniqueness check
+
+        Returns:
+            List of warning messages (non-fatal issues)
+
+        Raises:
+            ValueError: If validation fails for any required field
+        """
+        warnings: list[str] = []
+
+        # Validate name (raises ValueError if invalid)
+        self._validate_name(name, exclude_id)
+
+        # Validate targets (raises ValueError if invalid format)
+        target_warnings = self._validate_targets(targets)
+        warnings.extend(target_warnings)
+
+        # Validate exclusions (raises ValueError if invalid)
+        exclusion_warnings = self._validate_exclusions(exclusions, targets)
+        warnings.extend(exclusion_warnings)
+
+        return warnings
+
     def create_profile(
         self,
         name: str,
@@ -176,6 +465,9 @@ class ProfileManager:
         Raises:
             ValueError: If validation fails
         """
+        # Validate profile fields (raises ValueError if invalid)
+        self._validate_profile(name, targets, exclusions or {})
+
         timestamp = self._get_timestamp()
 
         profile = ScanProfile(
@@ -245,12 +537,28 @@ class ProfileManager:
             if profile is None:
                 return None
 
+            # Determine final values (updated or existing)
+            new_name = updates.get("name", profile.name)
+            new_targets = updates.get("targets", profile.targets)
+            new_exclusions = updates.get("exclusions", profile.exclusions)
+
+        # Validate updated fields (raises ValueError if invalid)
+        # Pass profile_id to exclude_id so name uniqueness check excludes this profile
+        self._validate_profile(
+            new_name, new_targets, new_exclusions, exclude_id=profile_id
+        )
+
+        with self._lock:
+            profile = self._profiles.get(profile_id)
+            if profile is None:
+                return None
+
             # Create updated profile with new values
             updated_profile = ScanProfile(
                 id=profile.id,
-                name=updates.get("name", profile.name),
-                targets=updates.get("targets", profile.targets),
-                exclusions=updates.get("exclusions", profile.exclusions),
+                name=new_name,
+                targets=new_targets,
+                exclusions=new_exclusions,
                 created_at=profile.created_at,
                 updated_at=self._get_timestamp(),
                 is_default=profile.is_default,  # Cannot change is_default
