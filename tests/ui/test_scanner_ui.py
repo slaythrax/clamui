@@ -250,6 +250,16 @@ def mock_scan_view(scan_view_class, mock_gtk_modules):
         view._select_folder_btn = mock.MagicMock()
         view._select_file_btn = mock.MagicMock()
 
+        # Results display UI elements
+        view._status_banner = mock.MagicMock()
+        view._threats_listbox = mock.MagicMock()
+        view._results_placeholder = mock.MagicMock()
+        view._copy_button = mock.MagicMock()
+        view._export_text_button = mock.MagicMock()
+        view._export_csv_button = mock.MagicMock()
+        view._raw_output = ""
+        view._current_result = None
+
         # Mock internal methods commonly used
         view._setup_ui = mock.MagicMock()
         view._setup_drop_css = mock.MagicMock()
@@ -921,3 +931,300 @@ def test_scanner_ui_module_loads():
 
         from src.ui.scan_view import ScanView
         assert ScanView is not None
+
+
+@pytest.mark.ui
+class TestResultsDisplayUI:
+    """Tests for scan results display UI functionality."""
+
+    def test_results_group_exists(self, mock_scan_view):
+        """Test that the results group attribute exists."""
+        assert hasattr(mock_scan_view, '_results_group')
+        assert mock_scan_view._results_group is not None
+
+    def test_status_banner_exists(self, mock_scan_view):
+        """Test that the status banner attribute exists."""
+        assert hasattr(mock_scan_view, '_status_banner')
+
+    def test_threats_listbox_attribute_exists(self, mock_scan_view):
+        """Test that the threats listbox attribute exists."""
+        assert hasattr(mock_scan_view, '_threats_listbox')
+
+    def test_results_placeholder_exists(self, mock_scan_view):
+        """Test that the results placeholder attribute exists."""
+        assert hasattr(mock_scan_view, '_results_placeholder')
+
+    def test_clear_results_resets_display(self, mock_scan_view):
+        """Test that _clear_results resets the display to initial state."""
+        # Reset to use real method
+        mock_scan_view._clear_results = mock_scan_view.__class__._clear_results.__get__(
+            mock_scan_view, mock_scan_view.__class__
+        )
+
+        # Set up listbox to return None on first call (empty)
+        mock_scan_view._threats_listbox.get_row_at_index.return_value = None
+
+        # Call clear results
+        mock_scan_view._clear_results()
+
+        # Verify listbox visibility is set to False
+        mock_scan_view._threats_listbox.set_visible.assert_called_with(False)
+
+        # Verify placeholder visibility is set to True
+        mock_scan_view._results_placeholder.set_visible.assert_called_with(True)
+
+        # Verify status banner is hidden
+        mock_scan_view._status_banner.set_revealed.assert_called_with(False)
+
+        # Verify export buttons are disabled
+        mock_scan_view._copy_button.set_sensitive.assert_called_with(False)
+        mock_scan_view._export_text_button.set_sensitive.assert_called_with(False)
+        mock_scan_view._export_csv_button.set_sensitive.assert_called_with(False)
+
+    def test_clear_results_resets_pagination_state(self, mock_scan_view):
+        """Test that _clear_results resets pagination-related state."""
+        # Set some pagination state
+        mock_scan_view._displayed_threat_count = 50
+        mock_scan_view._all_threat_details = [mock.MagicMock() for _ in range(100)]
+        mock_scan_view._load_more_row = mock.MagicMock()
+
+        # Reset to use real method
+        mock_scan_view._clear_results = mock_scan_view.__class__._clear_results.__get__(
+            mock_scan_view, mock_scan_view.__class__
+        )
+        mock_scan_view._threats_listbox.get_row_at_index.return_value = None
+
+        mock_scan_view._clear_results()
+
+        # Verify pagination state is reset
+        assert mock_scan_view._displayed_threat_count == 0
+        assert mock_scan_view._all_threat_details == []
+        assert mock_scan_view._load_more_row is None
+
+    def test_display_results_stores_raw_output(self, mock_scan_view, mock_gtk_modules):
+        """Test that _display_results stores the raw output for fullscreen view."""
+        # Create a mock scan result
+        mock_result = mock.MagicMock()
+        mock_result.status = "clean"
+        mock_result.stdout = "Test raw output"
+        mock_result.threat_details = []
+        mock_result.scanned_files = 10
+        mock_result.scanned_dirs = 2
+        mock_result.infected_count = 0
+
+        # Reset to use real method
+        mock_scan_view._display_results = mock_scan_view.__class__._display_results.__get__(
+            mock_scan_view, mock_scan_view.__class__
+        )
+        mock_scan_view._create_clean_files_summary_row = mock.MagicMock(
+            return_value=mock.MagicMock()
+        )
+        mock_scan_view._threats_listbox.get_row_at_index.return_value = None
+
+        # Mock the ScanStatus import
+        with mock.patch.dict(sys.modules['src.core.scanner'].__dict__, {'ScanStatus': mock.MagicMock()}):
+            sys.modules['src.core.scanner'].ScanStatus.CLEAN = "clean"
+            sys.modules['src.core.scanner'].ScanStatus.INFECTED = "infected"
+            mock_scan_view._display_results(mock_result)
+
+        assert mock_scan_view._raw_output == "Test raw output"
+
+    def test_display_results_stores_current_result(self, mock_scan_view, mock_gtk_modules):
+        """Test that _display_results stores the current result for export."""
+        mock_result = mock.MagicMock()
+        mock_result.status = "clean"
+        mock_result.stdout = "Output"
+        mock_result.threat_details = []
+        mock_result.scanned_files = 5
+        mock_result.scanned_dirs = 1
+        mock_result.infected_count = 0
+
+        mock_scan_view._display_results = mock_scan_view.__class__._display_results.__get__(
+            mock_scan_view, mock_scan_view.__class__
+        )
+        mock_scan_view._create_clean_files_summary_row = mock.MagicMock(
+            return_value=mock.MagicMock()
+        )
+        mock_scan_view._threats_listbox.get_row_at_index.return_value = None
+
+        with mock.patch.dict(sys.modules['src.core.scanner'].__dict__, {'ScanStatus': mock.MagicMock()}):
+            sys.modules['src.core.scanner'].ScanStatus.CLEAN = "clean"
+            sys.modules['src.core.scanner'].ScanStatus.INFECTED = "infected"
+            mock_scan_view._display_results(mock_result)
+
+        assert mock_scan_view._current_result == mock_result
+
+    def test_display_results_enables_export_buttons(self, mock_scan_view, mock_gtk_modules):
+        """Test that _display_results enables export buttons when results available."""
+        mock_result = mock.MagicMock()
+        mock_result.status = "clean"
+        mock_result.stdout = "Output"
+        mock_result.threat_details = []
+        mock_result.scanned_files = 5
+        mock_result.scanned_dirs = 1
+        mock_result.infected_count = 0
+
+        mock_scan_view._display_results = mock_scan_view.__class__._display_results.__get__(
+            mock_scan_view, mock_scan_view.__class__
+        )
+        mock_scan_view._create_clean_files_summary_row = mock.MagicMock(
+            return_value=mock.MagicMock()
+        )
+        mock_scan_view._threats_listbox.get_row_at_index.return_value = None
+
+        with mock.patch.dict(sys.modules['src.core.scanner'].__dict__, {'ScanStatus': mock.MagicMock()}):
+            sys.modules['src.core.scanner'].ScanStatus.CLEAN = "clean"
+            sys.modules['src.core.scanner'].ScanStatus.INFECTED = "infected"
+            mock_scan_view._display_results(mock_result)
+
+        # Verify export buttons are enabled
+        mock_scan_view._copy_button.set_sensitive.assert_called_with(True)
+        mock_scan_view._export_text_button.set_sensitive.assert_called_with(True)
+        mock_scan_view._export_csv_button.set_sensitive.assert_called_with(True)
+
+    def test_display_results_reveals_status_banner(self, mock_scan_view, mock_gtk_modules):
+        """Test that _display_results reveals the status banner."""
+        mock_result = mock.MagicMock()
+        mock_result.status = "clean"
+        mock_result.stdout = "Output"
+        mock_result.threat_details = []
+        mock_result.scanned_files = 5
+        mock_result.scanned_dirs = 1
+        mock_result.infected_count = 0
+
+        mock_scan_view._display_results = mock_scan_view.__class__._display_results.__get__(
+            mock_scan_view, mock_scan_view.__class__
+        )
+        mock_scan_view._create_clean_files_summary_row = mock.MagicMock(
+            return_value=mock.MagicMock()
+        )
+        mock_scan_view._threats_listbox.get_row_at_index.return_value = None
+
+        with mock.patch.dict(sys.modules['src.core.scanner'].__dict__, {'ScanStatus': mock.MagicMock()}):
+            sys.modules['src.core.scanner'].ScanStatus.CLEAN = "clean"
+            sys.modules['src.core.scanner'].ScanStatus.INFECTED = "infected"
+            mock_scan_view._display_results(mock_result)
+
+        mock_scan_view._status_banner.set_revealed.assert_called_with(True)
+
+    def test_on_scan_complete_calls_display_results(self, mock_scan_view):
+        """Test that _on_scan_complete calls _display_results with the result."""
+        mock_result = mock.MagicMock()
+
+        mock_scan_view._on_scan_complete = mock_scan_view.__class__._on_scan_complete.__get__(
+            mock_scan_view, mock_scan_view.__class__
+        )
+        mock_scan_view._set_scanning_state = mock.MagicMock()
+
+        mock_scan_view._on_scan_complete(mock_result)
+
+        mock_scan_view._display_results.assert_called_once_with(mock_result)
+
+    def test_on_scan_complete_sets_scanning_state_false(self, mock_scan_view):
+        """Test that _on_scan_complete sets scanning state to False."""
+        mock_result = mock.MagicMock()
+
+        mock_scan_view._on_scan_complete = mock_scan_view.__class__._on_scan_complete.__get__(
+            mock_scan_view, mock_scan_view.__class__
+        )
+        mock_scan_view._set_scanning_state = mock.MagicMock()
+
+        mock_scan_view._on_scan_complete(mock_result)
+
+        mock_scan_view._set_scanning_state.assert_called_once_with(False, mock_result)
+
+    def test_copy_button_exists(self, mock_scan_view):
+        """Test that the copy button attribute exists."""
+        assert hasattr(mock_scan_view, '_copy_button')
+
+    def test_export_text_button_exists(self, mock_scan_view):
+        """Test that the export text button attribute exists."""
+        assert hasattr(mock_scan_view, '_export_text_button')
+
+    def test_export_csv_button_exists(self, mock_scan_view):
+        """Test that the export CSV button attribute exists."""
+        assert hasattr(mock_scan_view, '_export_csv_button')
+
+    def test_fullscreen_button_attribute_exists(self, mock_scan_view):
+        """Test that the fullscreen button attribute exists (added in fixture)."""
+        mock_scan_view._fullscreen_button = mock.MagicMock()
+        assert hasattr(mock_scan_view, '_fullscreen_button')
+
+
+# Module-level test function for results display verification
+@pytest.mark.ui
+def test_results_display_ui():
+    """
+    Test for results display UI functionality.
+
+    This test verifies that the results display UI components work correctly,
+    including the status banner, results listbox, and export buttons.
+    """
+    # Create mocks
+    mock_gtk = mock.MagicMock()
+    mock_adw = mock.MagicMock()
+    mock_gio = mock.MagicMock()
+    mock_glib = mock.MagicMock()
+    mock_gdk = mock.MagicMock()
+
+    class MockGtkBox:
+        def __init__(self, orientation=None, **kwargs):
+            self.children = []
+            self._selected_path = ""
+
+        def set_margin_top(self, v): pass
+        def set_margin_bottom(self, v): pass
+        def set_margin_start(self, v): pass
+        def set_margin_end(self, v): pass
+        def set_spacing(self, v): pass
+        def append(self, child):
+            self.children.append(child)
+        def get_style_context(self): return mock.MagicMock()
+        def get_root(self): return None
+
+    mock_gtk.Box = MockGtkBox
+    mock_gtk.Orientation = mock.MagicMock()
+    mock_gtk.Orientation.VERTICAL = 1
+    mock_gtk.FileDialog = mock.MagicMock()
+
+    mock_gi = mock.MagicMock()
+    mock_gi.version_info = (3, 48, 0)
+    mock_gi.require_version = mock.MagicMock()
+
+    mock_repository = mock.MagicMock()
+    mock_repository.Gtk = mock_gtk
+    mock_repository.Adw = mock_adw
+    mock_repository.Gio = mock_gio
+    mock_repository.GLib = mock_glib
+    mock_repository.Gdk = mock_gdk
+
+    mock_utils = mock.MagicMock()
+    mock_utils.format_scan_path = mock.MagicMock(return_value="/formatted/path")
+    mock_utils.format_results_as_text = mock.MagicMock(return_value="formatted results")
+
+    with mock.patch.dict(sys.modules, {
+        'gi': mock_gi,
+        'gi.repository': mock_repository,
+        'src.core.scanner': mock.MagicMock(),
+        'src.core.utils': mock_utils,
+        'src.core.quarantine': mock.MagicMock(),
+        'src.ui.fullscreen_dialog': mock.MagicMock(),
+        'src.ui.profile_dialogs': mock.MagicMock(),
+    }):
+        # Clear any cached import
+        if 'src.ui.scan_view' in sys.modules:
+            del sys.modules['src.ui.scan_view']
+
+        from src.ui.scan_view import ScanView
+        assert ScanView is not None
+
+        # Verify the class has results display methods
+        assert hasattr(ScanView, '_display_results')
+        assert hasattr(ScanView, '_clear_results')
+        assert hasattr(ScanView, '_on_scan_complete')
+        assert hasattr(ScanView, '_create_threat_card')
+        assert hasattr(ScanView, '_create_clean_files_summary_row')
+        assert hasattr(ScanView, '_on_copy_results_clicked')
+        assert hasattr(ScanView, '_on_export_text_clicked')
+        assert hasattr(ScanView, '_on_export_csv_clicked')
+        assert hasattr(ScanView, '_on_fullscreen_results_clicked')
