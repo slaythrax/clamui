@@ -324,8 +324,74 @@ The application interprets ClamAV exit codes as follows:
 
 ### Running Tests
 
+ClamUI uses pytest for testing with several test categories:
+
+#### Unit Tests
+
+Run all unit tests (fast, no display required):
+
 ```bash
-python -m pytest tests/
+uv run pytest tests/core/
+```
+
+#### Integration Tests
+
+Integration tests verify component interactions and may require external dependencies like ClamAV:
+
+```bash
+# Run integration tests only
+uv run pytest -m integration tests/
+
+# Run all tests including integration
+uv run pytest tests/
+```
+
+#### UI Tests (Require Display)
+
+UI tests require a display environment. On headless servers or CI environments, use `xvfb-run`:
+
+```bash
+# Run UI tests with virtual framebuffer
+xvfb-run -a uv run pytest tests/ui/
+
+# Run all tests in headless environment
+xvfb-run -a uv run pytest tests/
+```
+
+#### Test Categories (Markers)
+
+The project uses pytest markers to categorize tests:
+
+- `integration`: Tests that verify component integration (may need ClamAV)
+- `ui`: Tests that require GTK/display environment
+- `slow`: Long-running tests
+
+Run specific categories:
+
+```bash
+# Skip slow tests
+uv run pytest -m "not slow" tests/
+
+# Run only UI integration tests
+xvfb-run -a uv run pytest -m "ui and integration" tests/
+```
+
+#### Test Prerequisites
+
+- **Unit tests**: No special requirements
+- **Integration tests**: ClamAV (`clamscan`) should be installed
+- **UI tests**: Requires GTK4/Adwaita and either a display or Xvfb:
+  ```bash
+  # Ubuntu/Debian - install Xvfb for headless testing
+  sudo apt install xvfb
+  ```
+
+#### Continuous Integration
+
+For CI environments, run the full test suite with:
+
+```bash
+xvfb-run -a uv run pytest tests/ -v --tb=short
 ```
 
 ## License
