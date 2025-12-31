@@ -141,16 +141,15 @@ class ProfileDialog(Adw.Dialog):
         basic_group.set_description("Basic profile settings")
 
         # Profile name entry row
+        # Note: Adw.EntryRow doesn't have set_max_length - validation is done in _on_name_changed
         self._name_row = Adw.EntryRow()
         self._name_row.set_title("Name")
-        self._name_row.set_max_length(self.MAX_NAME_LENGTH)
         self._name_row.connect("changed", self._on_name_changed)
         basic_group.add(self._name_row)
 
         # Description entry row
         self._description_row = Adw.EntryRow()
         self._description_row.set_title("Description")
-        self._description_row.set_max_length(200)
         basic_group.add(self._description_row)
 
         # Validation message (hidden by default)
