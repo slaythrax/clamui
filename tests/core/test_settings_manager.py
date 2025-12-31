@@ -702,3 +702,444 @@ class TestSettingsExclusions:
         assert ".git" in pattern_names
         assert ".venv" in pattern_names
         assert "__pycache__" in pattern_names
+
+
+class TestSettingsManagerLoadEdgeCases:
+    """Edge case tests for SettingsManager load operations."""
+
+    @pytest.fixture
+    def temp_config_dir(self):
+        """Create a temporary directory for settings storage."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            yield tmpdir
+
+    def test_load_handles_non_dict_json(self, temp_config_dir):
+        """Test that load raises TypeError for JSON file containing non-dict data.
+
+        Note: The current implementation doesn't gracefully handle non-dict JSON.
+        This test documents the current behavior where a TypeError is raised.
+        """
+        config_dir = Path(temp_config_dir)
+        config_dir.mkdir(parents=True, exist_ok=True)
+        settings_file = config_dir / "settings.json"
+        # Write a JSON array instead of dict
+        settings_file.write_text('["item1", "item2"]')
+
+        # Current implementation raises TypeError when trying to merge non-dict
+        with pytest.raises(TypeError):
+            SettingsManager(config_dir=config_dir)
+
+    def test_load_handles_null_json(self, temp_config_dir):
+        """Test that load raises TypeError for JSON file containing null.
+
+        Note: The current implementation doesn't gracefully handle null JSON.
+        This test documents the current behavior where a TypeError is raised.
+        """
+        config_dir = Path(temp_config_dir)
+        config_dir.mkdir(parents=True, exist_ok=True)
+        settings_file = config_dir / "settings.json"
+        settings_file.write_text("null")
+
+        # Current implementation raises TypeError when trying to merge None
+        with pytest.raises(TypeError):
+            SettingsManager(config_dir=config_dir)
+
+    def test_load_handles_json_with_unicode(self, temp_config_dir):
+        """Test that load handles JSON with unicode characters."""
+        config_dir = Path(temp_config_dir)
+        config_dir.mkdir(parents=True, exist_ok=True)
+        settings_file = config_dir / "settings.json"
+        settings_file.write_text(json.dumps({
+            "notifications_enabled": True,
+            "unicode_setting": "文字テスト 🎉"
+        }))
+
+        manager = SettingsManager(config_dir=config_dir)
+        assert manager.get("unicode_setting") == "文字テスト 🎉"
+
+    def test_load_handles_very_large_file(self, temp_config_dir):
+        """Test that load handles a large settings file."""
+        config_dir = Path(temp_config_dir)
+        config_dir.mkdir(parents=True, exist_ok=True)
+        settings_file = config_dir / "settings.json"
+
+        # Create a settings dict with many keys
+        large_settings = {"notifications_enabled": False}
+        for i in range(1000):
+            large_settings[f"setting_{i}"] = f"value_{i}"
+
+        settings_file.write_text(json.dumps(large_settings))
+
+        manager = SettingsManager(config_dir=config_dir)
+        assert manager.get("notifications_enabled") is False
+        assert manager.get("setting_500") == "value_500"
+
+    def test_load_handles_deeply_nested_json(self, temp_config_dir):
+        """Test that load handles deeply nested JSON structures."""
+        config_dir = Path(temp_config_dir)
+        config_dir.mkdir(parents=True, exist_ok=True)
+        settings_file = config_dir / "settings.json"
+
+        nested_value = {"level": 1}
+        current = nested_value
+        for i in range(2, 20):
+            current["nested"] = {"level": i}
+            current = current["nested"]
+
+        settings_file.write_text(json.dumps({
+            "notifications_enabled": True,
+            "deeply_nested": nested_value
+        }))
+
+        manager = SettingsManager(config_dir=config_dir)
+        assert manager.get("deeply_nested") is not None
+        assert manager.get("deeply_nested")["level"] == 1
+
+
+class TestSettingsManagerSaveEdgeCases:
+    """Edge case tests for SettingsManager save operations."""
+
+    @pytest.fixture
+    def temp_config_dir(self):
+        """Create a temporary directory for settings storage."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            yield tmpdir
+
+    def test_save_handles_mkdir_permission_error(self, temp_config_dir):
+        """Test that save handles permission error when creating directory."""
+        manager = SettingsManager(config_dir=temp_config_dir)
+
+        with mock.patch.object(Path, "mkdir", side_effect=PermissionError("Cannot create directory")):
+            result = manager.save()
+            assert result is False
+
+    def test_save_handles_mkdir_oserror(self, temp_config_dir):
+        """Test that save handles OSError when creating directory."""
+        manager = SettingsManager(config_dir=temp_config_dir)
+
+        with mock.patch.object(Path, "mkdir", side_effect=OSError("Disk full")):
+            result = manager.save()
+            assert result is False
+
+    def test_save_handles_json_serialization_error(self, temp_config_dir):
+        """Test that save raises TypeError for non-serializable values.
+
+        Note: The current implementation doesn't catch TypeError from json.dump.
+        This test documents the current behavior.
+        """
+        manager = SettingsManager(config_dir=temp_config_dir)
+
+        # Set a value that can't be JSON serialized
+        with manager._lock:
+            manager._settings["bad_value"] = object()
+
+        # Current implementation raises TypeError for non-serializable objects
+        with pytest.raises(TypeError):
+            manager.save()
+
+    def test_save_handles_unicode_values(self, temp_config_dir):
+        """Test that save correctly handles unicode values."""
+        manager = SettingsManager(config_dir=temp_config_dir)
+        manager.set("unicode_key", "Привет мир 🌍")
+
+        # Reload and verify
+        manager2 = SettingsManager(config_dir=temp_config_dir)
+        assert manager2.get("unicode_key") == "Привет мир 🌍"
+
+    def test_save_creates_parent_directories(self, temp_config_dir):
+        """Test that save creates parent directories if they don't exist."""
+        nested_dir = Path(temp_config_dir) / "deep" / "nested" / "config"
+        manager = SettingsManager(config_dir=nested_dir)
+        result = manager.save()
+
+        assert result is True
+        assert nested_dir.exists()
+        assert (nested_dir / "settings.json").exists()
+
+
+class TestSettingsManagerScheduledScanEdgeCases:
+    """Edge case tests for scheduled scan settings."""
+
+    @pytest.fixture
+    def temp_config_dir(self):
+        """Create a temporary directory for settings storage."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            yield tmpdir
+
+    @pytest.fixture
+    def settings_manager(self, temp_config_dir):
+        """Create a SettingsManager with a temporary directory."""
+        return SettingsManager(config_dir=temp_config_dir)
+
+    def test_schedule_frequency_edge_values(self, settings_manager):
+        """Test setting various schedule frequency values."""
+        valid_frequencies = ["daily", "weekly", "monthly"]
+        for freq in valid_frequencies:
+            settings_manager.set("schedule_frequency", freq)
+            assert settings_manager.get("schedule_frequency") == freq
+
+    def test_schedule_time_edge_values(self, settings_manager):
+        """Test setting edge case time values."""
+        edge_times = ["00:00", "23:59", "12:00", "06:30"]
+        for time_val in edge_times:
+            settings_manager.set("schedule_time", time_val)
+            assert settings_manager.get("schedule_time") == time_val
+
+    def test_schedule_day_of_week_edge_values(self, settings_manager):
+        """Test setting edge case day of week values."""
+        # Valid range is 0-6
+        for day in range(7):
+            settings_manager.set("schedule_day_of_week", day)
+            assert settings_manager.get("schedule_day_of_week") == day
+
+    def test_schedule_day_of_month_edge_values(self, settings_manager):
+        """Test setting edge case day of month values."""
+        # Valid range is 1-28
+        for day in [1, 15, 28]:
+            settings_manager.set("schedule_day_of_month", day)
+            assert settings_manager.get("schedule_day_of_month") == day
+
+    def test_schedule_targets_empty_list(self, settings_manager):
+        """Test that schedule_targets defaults to empty list."""
+        assert settings_manager.get("schedule_targets") == []
+
+    def test_schedule_targets_with_paths(self, settings_manager):
+        """Test setting schedule_targets with multiple paths."""
+        targets = ["/home/user/Documents", "/home/user/Downloads"]
+        settings_manager.set("schedule_targets", targets)
+        assert settings_manager.get("schedule_targets") == targets
+
+    def test_schedule_boolean_settings(self, settings_manager):
+        """Test scheduled scan boolean settings."""
+        assert settings_manager.get("scheduled_scans_enabled") is False
+        assert settings_manager.get("schedule_skip_on_battery") is True
+        assert settings_manager.get("schedule_auto_quarantine") is False
+
+        settings_manager.set("scheduled_scans_enabled", True)
+        settings_manager.set("schedule_skip_on_battery", False)
+        settings_manager.set("schedule_auto_quarantine", True)
+
+        assert settings_manager.get("scheduled_scans_enabled") is True
+        assert settings_manager.get("schedule_skip_on_battery") is False
+        assert settings_manager.get("schedule_auto_quarantine") is True
+
+
+class TestSettingsManagerQuarantineEdgeCases:
+    """Edge case tests for quarantine settings."""
+
+    @pytest.fixture
+    def temp_config_dir(self):
+        """Create a temporary directory for settings storage."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            yield tmpdir
+
+    @pytest.fixture
+    def settings_manager(self, temp_config_dir):
+        """Create a SettingsManager with a temporary directory."""
+        return SettingsManager(config_dir=temp_config_dir)
+
+    def test_quarantine_directory_default_empty(self, settings_manager):
+        """Test that quarantine_directory defaults to empty string."""
+        assert settings_manager.get("quarantine_directory") == ""
+
+    def test_quarantine_directory_custom_path(self, settings_manager):
+        """Test setting custom quarantine directory."""
+        custom_path = "/custom/quarantine/path"
+        settings_manager.set("quarantine_directory", custom_path)
+        assert settings_manager.get("quarantine_directory") == custom_path
+
+    def test_quarantine_directory_with_spaces(self, settings_manager):
+        """Test quarantine directory with spaces in path."""
+        path_with_spaces = "/home/user/My Quarantine Folder"
+        settings_manager.set("quarantine_directory", path_with_spaces)
+        assert settings_manager.get("quarantine_directory") == path_with_spaces
+
+
+class TestSettingsManagerMalformedExclusionEdgeCases:
+    """Edge case tests for handling malformed exclusion patterns."""
+
+    @pytest.fixture
+    def temp_config_dir(self):
+        """Create a temporary directory for settings storage."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            yield tmpdir
+
+    def test_load_exclusions_with_missing_keys(self, temp_config_dir):
+        """Test loading exclusion patterns with missing required keys."""
+        config_dir = Path(temp_config_dir)
+        config_dir.mkdir(parents=True, exist_ok=True)
+        settings_file = config_dir / "settings.json"
+
+        # Write exclusions with various missing keys
+        settings_file.write_text(json.dumps({
+            "exclusion_patterns": [
+                {"pattern": "*.log"},  # Missing type and enabled
+                {"type": "file", "enabled": True},  # Missing pattern
+                {"pattern": "", "type": "file", "enabled": True},  # Empty pattern
+            ]
+        }))
+
+        manager = SettingsManager(config_dir=config_dir)
+        patterns = manager.get("exclusion_patterns")
+
+        # Should load all patterns (validation is done elsewhere)
+        assert len(patterns) == 3
+
+    def test_load_exclusions_with_wrong_types(self, temp_config_dir):
+        """Test loading exclusion patterns with wrong value types."""
+        config_dir = Path(temp_config_dir)
+        config_dir.mkdir(parents=True, exist_ok=True)
+        settings_file = config_dir / "settings.json"
+
+        # Write exclusions with wrong types
+        settings_file.write_text(json.dumps({
+            "exclusion_patterns": [
+                {"pattern": 123, "type": "file", "enabled": True},  # pattern should be string
+                {"pattern": "*.log", "type": 456, "enabled": True},  # type should be string
+                {"pattern": "*.tmp", "type": "file", "enabled": "yes"},  # enabled should be bool
+            ]
+        }))
+
+        manager = SettingsManager(config_dir=config_dir)
+        patterns = manager.get("exclusion_patterns")
+
+        # Should load all patterns (type checking is not done in SettingsManager)
+        assert len(patterns) == 3
+
+    def test_exclusion_patterns_not_a_list(self, temp_config_dir):
+        """Test loading when exclusion_patterns is not a list."""
+        config_dir = Path(temp_config_dir)
+        config_dir.mkdir(parents=True, exist_ok=True)
+        settings_file = config_dir / "settings.json"
+
+        # Write exclusion_patterns as a dict instead of list
+        settings_file.write_text(json.dumps({
+            "exclusion_patterns": {"pattern": "*.log", "enabled": True}
+        }))
+
+        manager = SettingsManager(config_dir=config_dir)
+        patterns = manager.get("exclusion_patterns")
+
+        # Should load the value as-is (validation happens elsewhere)
+        assert isinstance(patterns, dict)
+
+    def test_exclusion_patterns_null_value(self, temp_config_dir):
+        """Test loading when exclusion_patterns is null."""
+        config_dir = Path(temp_config_dir)
+        config_dir.mkdir(parents=True, exist_ok=True)
+        settings_file = config_dir / "settings.json"
+
+        settings_file.write_text(json.dumps({
+            "notifications_enabled": True,
+            "exclusion_patterns": None
+        }))
+
+        manager = SettingsManager(config_dir=config_dir)
+        patterns = manager.get("exclusion_patterns")
+
+        # Should return None (the stored value)
+        assert patterns is None
+
+
+class TestSettingsManagerConcurrencyEdgeCases:
+    """Edge case tests for concurrent access to SettingsManager."""
+
+    @pytest.fixture
+    def temp_config_dir(self):
+        """Create a temporary directory for settings storage."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            yield tmpdir
+
+    def test_concurrent_reset_operations(self, temp_config_dir):
+        """Test concurrent reset_to_defaults operations."""
+        import threading
+
+        manager = SettingsManager(config_dir=temp_config_dir)
+        errors = []
+
+        def reset_settings():
+            try:
+                for _ in range(10):
+                    manager.reset_to_defaults()
+            except Exception as e:
+                errors.append(str(e))
+
+        threads = [threading.Thread(target=reset_settings) for _ in range(5)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        assert len(errors) == 0
+        # After all resets, should have defaults
+        assert manager.get("notifications_enabled") is True
+
+    def test_concurrent_get_all_operations(self, temp_config_dir):
+        """Test concurrent get_all operations."""
+        import threading
+
+        manager = SettingsManager(config_dir=temp_config_dir)
+        manager.set("test_key", "test_value")
+
+        results = []
+        errors = []
+
+        def get_all_settings():
+            try:
+                for _ in range(10):
+                    all_settings = manager.get_all()
+                    results.append(all_settings)
+            except Exception as e:
+                errors.append(str(e))
+
+        threads = [threading.Thread(target=get_all_settings) for _ in range(5)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        assert len(errors) == 0
+        assert len(results) == 50  # 5 threads * 10 iterations
+
+    def test_concurrent_mixed_operations(self, temp_config_dir):
+        """Test concurrent mixed get/set/reset operations."""
+        import threading
+
+        manager = SettingsManager(config_dir=temp_config_dir)
+        errors = []
+
+        def do_gets():
+            try:
+                for _ in range(20):
+                    manager.get("notifications_enabled")
+                    manager.get("nonexistent_key", "default")
+            except Exception as e:
+                errors.append(f"Get error: {e}")
+
+        def do_sets():
+            try:
+                for i in range(20):
+                    manager.set(f"key_{i}", f"value_{i}")
+            except Exception as e:
+                errors.append(f"Set error: {e}")
+
+        def do_resets():
+            try:
+                for _ in range(5):
+                    manager.reset_to_defaults()
+            except Exception as e:
+                errors.append(f"Reset error: {e}")
+
+        threads = [
+            threading.Thread(target=do_gets),
+            threading.Thread(target=do_sets),
+            threading.Thread(target=do_resets),
+            threading.Thread(target=do_gets),
+        ]
+
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        assert len(errors) == 0

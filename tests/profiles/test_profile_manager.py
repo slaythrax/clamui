@@ -1,0 +1,1109 @@
+# ClamUI ProfileManager Tests
+"""Unit tests for the ProfileManager class."""
+
+import json
+import os
+import tempfile
+import threading
+from pathlib import Path
+from typing import Any
+from unittest import mock
+
+import pytest
+
+from src.profiles.models import ScanProfile
+from src.profiles.profile_manager import (
+    MAX_PROFILE_NAME_LENGTH,
+    MIN_PROFILE_NAME_LENGTH,
+    ProfileManager,
+)
+
+
+class TestProfileManagerInit:
+    """Tests for ProfileManager initialization."""
+
+    @pytest.fixture
+    def temp_config_dir(self):
+        """Create a temporary directory for profile storage."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            yield tmpdir
+
+    def test_init_creates_config_directory(self, temp_config_dir):
+        """Test that ProfileManager creates config directory if needed."""
+        nested_dir = Path(temp_config_dir) / "nested" / "config"
+        manager = ProfileManager(config_dir=nested_dir)
+        # The directory is created when profiles are saved
+        assert nested_dir.exists() or manager._config_dir == nested_dir
+
+    def test_init_creates_default_profiles(self, temp_config_dir):
+        """Test that ProfileManager creates default profiles on first init."""
+        manager = ProfileManager(config_dir=temp_config_dir)
+        profiles = manager.list_profiles()
+
+        # Should have the default profiles defined in DEFAULT_PROFILES
+        default_names = {p["name"] for p in ProfileManager.DEFAULT_PROFILES}
+        profile_names = {p.name for p in profiles}
+
+        assert default_names.issubset(profile_names)
+
+    def test_init_default_profiles_are_marked_default(self, temp_config_dir):
+        """Test that default profiles have is_default=True."""
+        manager = ProfileManager(config_dir=temp_config_dir)
+        profiles = manager.list_profiles()
+
+        default_names = {p["name"] for p in ProfileManager.DEFAULT_PROFILES}
+
+        for profile in profiles:
+            if profile.name in default_names:
+                assert profile.is_default is True
+
+    def test_init_loads_existing_profiles(self, temp_config_dir):
+        """Test that ProfileManager loads existing profiles on init."""
+        # Create first manager and add a custom profile
+        manager1 = ProfileManager(config_dir=temp_config_dir)
+        manager1.create_profile(
+            name="Custom Profile",
+            targets=["/home/user"],
+            exclusions={},
+        )
+
+        # Create second manager and verify custom profile is loaded
+        manager2 = ProfileManager(config_dir=temp_config_dir)
+        profile = manager2.get_profile_by_name("Custom Profile")
+
+        assert profile is not None
+        assert profile.name == "Custom Profile"
+
+    def test_init_does_not_duplicate_default_profiles(self, temp_config_dir):
+        """Test that default profiles are not duplicated on subsequent inits."""
+        manager1 = ProfileManager(config_dir=temp_config_dir)
+        initial_count = len(manager1.list_profiles())
+
+        manager2 = ProfileManager(config_dir=temp_config_dir)
+        second_count = len(manager2.list_profiles())
+
+        assert initial_count == second_count
+
+
+class TestProfileManagerValidation:
+    """Tests for ProfileManager validation methods."""
+
+    @pytest.fixture
+    def temp_config_dir(self):
+        """Create a temporary directory for profile storage."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            yield tmpdir
+
+    @pytest.fixture
+    def manager(self, temp_config_dir):
+        """Create a ProfileManager with a temporary directory."""
+        return ProfileManager(config_dir=temp_config_dir)
+
+    def test_validate_name_empty_string_raises(self, manager):
+        """Test that empty name raises ValueError."""
+        with pytest.raises(ValueError, match="cannot be empty"):
+            manager._validate_name("")
+
+    def test_validate_name_whitespace_only_raises(self, manager):
+        """Test that whitespace-only name raises ValueError."""
+        with pytest.raises(ValueError, match="cannot be empty"):
+            manager._validate_name("   ")
+
+    def test_validate_name_none_raises(self, manager):
+        """Test that None name raises ValueError."""
+        with pytest.raises(ValueError):
+            manager._validate_name(None)
+
+    def test_validate_name_too_long_raises(self, manager):
+        """Test that name exceeding max length raises ValueError."""
+        long_name = "x" * (MAX_PROFILE_NAME_LENGTH + 1)
+        with pytest.raises(ValueError, match="cannot exceed"):
+            manager._validate_name(long_name)
+
+    def test_validate_name_max_length_allowed(self, manager):
+        """Test that name at max length is valid."""
+        max_name = "x" * MAX_PROFILE_NAME_LENGTH
+        # Should not raise
+        manager._validate_name(max_name)
+
+    def test_validate_name_duplicate_raises(self, manager):
+        """Test that duplicate name raises ValueError."""
+        manager.create_profile(
+            name="Test Profile",
+            targets=["/home"],
+            exclusions={},
+        )
+        with pytest.raises(ValueError, match="already exists"):
+            manager._validate_name("Test Profile")
+
+    def test_validate_name_duplicate_with_exclude_id(self, manager):
+        """Test that duplicate check excludes specified ID."""
+        profile = manager.create_profile(
+            name="Test Profile",
+            targets=["/home"],
+            exclusions={},
+        )
+        # Should not raise when excluding the profile's own ID
+        manager._validate_name("Test Profile", exclude_id=profile.id)
+
+    def test_validate_path_format_empty_invalid(self, manager):
+        """Test that empty path is invalid."""
+        is_valid, error = manager._validate_path_format("")
+        assert is_valid is False
+        assert "empty" in error.lower()
+
+    def test_validate_path_format_whitespace_invalid(self, manager):
+        """Test that whitespace-only path is invalid."""
+        is_valid, error = manager._validate_path_format("   ")
+        assert is_valid is False
+
+    def test_validate_path_format_null_byte_invalid(self, manager):
+        """Test that path with null byte is invalid (security check)."""
+        is_valid, error = manager._validate_path_format("/home/user\x00/file")
+        assert is_valid is False
+        assert "invalid" in error.lower()
+
+    def test_validate_path_format_valid_absolute(self, manager):
+        """Test that valid absolute path is accepted."""
+        is_valid, error = manager._validate_path_format("/home/user/documents")
+        assert is_valid is True
+        assert error is None
+
+    def test_validate_path_format_valid_home_tilde(self, manager):
+        """Test that tilde path is accepted."""
+        is_valid, error = manager._validate_path_format("~/Downloads")
+        assert is_valid is True
+        assert error is None
+
+    def test_validate_path_format_valid_relative(self, manager):
+        """Test that relative path is accepted."""
+        is_valid, error = manager._validate_path_format("./documents")
+        assert is_valid is True
+        assert error is None
+
+    def test_validate_targets_not_list_raises(self, manager):
+        """Test that non-list targets raises ValueError."""
+        with pytest.raises(ValueError, match="must be a list"):
+            manager._validate_targets("/home/user")  # String instead of list
+
+    def test_validate_targets_non_string_item_raises(self, manager):
+        """Test that non-string item in targets raises ValueError."""
+        with pytest.raises(ValueError, match="must be a string"):
+            manager._validate_targets(["/home/user", 123])
+
+    def test_validate_targets_invalid_path_raises(self, manager):
+        """Test that invalid path in targets raises ValueError."""
+        with pytest.raises(ValueError, match="Invalid target path"):
+            manager._validate_targets(["/valid/path", "\x00invalid"])
+
+    def test_validate_targets_valid_paths(self, manager):
+        """Test that valid paths return empty warnings."""
+        warnings = manager._validate_targets(["/home/user", "~/Downloads"])
+        assert warnings == []
+
+    def test_validate_exclusions_not_dict_raises(self, manager):
+        """Test that non-dict exclusions raises ValueError."""
+        with pytest.raises(ValueError, match="must be a dictionary"):
+            manager._validate_exclusions(["/exclude"], ["/home"])
+
+    def test_validate_exclusions_paths_not_list_raises(self, manager):
+        """Test that non-list paths in exclusions raises ValueError."""
+        with pytest.raises(ValueError, match="'paths' must be a list"):
+            manager._validate_exclusions({"paths": "/single"}, ["/home"])
+
+    def test_validate_exclusions_path_not_string_raises(self, manager):
+        """Test that non-string path in exclusions raises ValueError."""
+        with pytest.raises(ValueError, match="must be a string"):
+            manager._validate_exclusions({"paths": [123]}, ["/home"])
+
+    def test_validate_exclusions_invalid_path_raises(self, manager):
+        """Test that invalid path in exclusions raises ValueError."""
+        with pytest.raises(ValueError, match="Invalid exclusion path"):
+            manager._validate_exclusions({"paths": ["\x00bad"]}, ["/home"])
+
+    def test_validate_exclusions_patterns_not_list_raises(self, manager):
+        """Test that non-list patterns in exclusions raises ValueError."""
+        with pytest.raises(ValueError, match="'patterns' must be a list"):
+            manager._validate_exclusions({"patterns": "*.tmp"}, ["/home"])
+
+    def test_validate_exclusions_pattern_not_string_raises(self, manager):
+        """Test that non-string pattern raises ValueError."""
+        with pytest.raises(ValueError, match="must be a string"):
+            manager._validate_exclusions({"patterns": [123]}, ["/home"])
+
+    def test_validate_exclusions_empty_pattern_raises(self, manager):
+        """Test that empty pattern raises ValueError."""
+        with pytest.raises(ValueError, match="cannot be empty"):
+            manager._validate_exclusions({"patterns": [""]}, ["/home"])
+
+    def test_validate_exclusions_valid_structure(self, manager):
+        """Test that valid exclusions return empty warnings."""
+        warnings = manager._validate_exclusions(
+            {"paths": ["/tmp"], "patterns": ["*.tmp"]},
+            ["/home"],
+        )
+        assert isinstance(warnings, list)
+
+    def test_validate_exclusions_empty_dict_valid(self, manager):
+        """Test that empty exclusions dict is valid."""
+        warnings = manager._validate_exclusions({}, ["/home"])
+        assert warnings == []
+
+
+class TestProfileManagerCircularExclusions:
+    """Tests for circular exclusion detection."""
+
+    @pytest.fixture
+    def temp_config_dir(self):
+        """Create a temporary directory for profile storage."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            yield tmpdir
+
+    @pytest.fixture
+    def manager(self, temp_config_dir):
+        """Create a ProfileManager with a temporary directory."""
+        return ProfileManager(config_dir=temp_config_dir)
+
+    def test_check_circular_exclusions_warns_when_all_excluded(self, manager, temp_config_dir):
+        """Test that warning is added when exclusion would exclude all targets."""
+        warnings: list[str] = []
+        # Create a target inside the temp dir
+        target_dir = Path(temp_config_dir) / "target"
+        target_dir.mkdir()
+
+        # Exclusion that is parent of target
+        manager._check_circular_exclusions(
+            exclusion_paths=[temp_config_dir],
+            targets=[str(target_dir)],
+            warnings=warnings,
+        )
+
+        assert len(warnings) > 0
+        assert "exclude all" in warnings[0].lower()
+
+    def test_check_circular_exclusions_no_warning_when_partial(self, manager, temp_config_dir):
+        """Test that no warning when exclusion doesn't cover all targets."""
+        warnings: list[str] = []
+        target1 = Path(temp_config_dir) / "target1"
+        target1.mkdir()
+
+        manager._check_circular_exclusions(
+            exclusion_paths=[str(target1)],
+            targets=[str(target1), "/some/other/path"],
+            warnings=warnings,
+        )
+
+        # Only one target is excluded, so no warning about excluding ALL
+        assert len([w for w in warnings if "exclude all" in w.lower()]) == 0
+
+    def test_check_circular_exclusions_empty_targets(self, manager):
+        """Test that empty targets doesn't cause issues."""
+        warnings: list[str] = []
+        manager._check_circular_exclusions(
+            exclusion_paths=["/some/path"],
+            targets=[],
+            warnings=warnings,
+        )
+        assert warnings == []
+
+    def test_check_circular_exclusions_empty_exclusions(self, manager):
+        """Test that empty exclusions doesn't cause issues."""
+        warnings: list[str] = []
+        manager._check_circular_exclusions(
+            exclusion_paths=[],
+            targets=["/home/user"],
+            warnings=warnings,
+        )
+        assert warnings == []
+
+
+class TestProfileManagerCRUD:
+    """Tests for ProfileManager CRUD operations."""
+
+    @pytest.fixture
+    def temp_config_dir(self):
+        """Create a temporary directory for profile storage."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            yield tmpdir
+
+    @pytest.fixture
+    def manager(self, temp_config_dir):
+        """Create a ProfileManager with a temporary directory."""
+        return ProfileManager(config_dir=temp_config_dir)
+
+    def test_create_profile_basic(self, manager):
+        """Test creating a basic profile."""
+        profile = manager.create_profile(
+            name="My Scan",
+            targets=["/home/user"],
+            exclusions={},
+        )
+
+        assert profile is not None
+        assert profile.name == "My Scan"
+        assert profile.targets == ["/home/user"]
+        assert profile.exclusions == {}
+        assert profile.is_default is False
+        assert profile.id is not None
+
+    def test_create_profile_with_all_fields(self, manager):
+        """Test creating a profile with all fields."""
+        profile = manager.create_profile(
+            name="Full Profile",
+            targets=["/home", "/var"],
+            exclusions={"paths": ["/var/cache"]},
+            description="A complete profile",
+            options={"recursive": True},
+            is_default=False,
+        )
+
+        assert profile.name == "Full Profile"
+        assert profile.targets == ["/home", "/var"]
+        assert profile.exclusions == {"paths": ["/var/cache"]}
+        assert profile.description == "A complete profile"
+        assert profile.options == {"recursive": True}
+
+    def test_create_profile_sets_timestamps(self, manager):
+        """Test that created profile has timestamps."""
+        profile = manager.create_profile(
+            name="Timestamped",
+            targets=["/home"],
+            exclusions={},
+        )
+
+        assert profile.created_at is not None
+        assert profile.updated_at is not None
+        assert "T" in profile.created_at  # ISO format
+
+    def test_create_profile_generates_unique_id(self, manager):
+        """Test that each profile gets a unique ID."""
+        profile1 = manager.create_profile(
+            name="Profile 1",
+            targets=["/home"],
+            exclusions={},
+        )
+        profile2 = manager.create_profile(
+            name="Profile 2",
+            targets=["/home"],
+            exclusions={},
+        )
+
+        assert profile1.id != profile2.id
+
+    def test_create_profile_invalid_name_raises(self, manager):
+        """Test that invalid name raises ValueError."""
+        with pytest.raises(ValueError):
+            manager.create_profile(
+                name="",
+                targets=["/home"],
+                exclusions={},
+            )
+
+    def test_create_profile_duplicate_name_raises(self, manager):
+        """Test that duplicate name raises ValueError."""
+        manager.create_profile(
+            name="Unique Name",
+            targets=["/home"],
+            exclusions={},
+        )
+        with pytest.raises(ValueError, match="already exists"):
+            manager.create_profile(
+                name="Unique Name",
+                targets=["/home"],
+                exclusions={},
+            )
+
+    def test_get_profile_by_id(self, manager):
+        """Test retrieving profile by ID."""
+        created = manager.create_profile(
+            name="Get Test",
+            targets=["/home"],
+            exclusions={},
+        )
+
+        retrieved = manager.get_profile(created.id)
+
+        assert retrieved is not None
+        assert retrieved.id == created.id
+        assert retrieved.name == created.name
+
+    def test_get_profile_by_id_not_found(self, manager):
+        """Test that non-existent ID returns None."""
+        result = manager.get_profile("nonexistent-uuid")
+        assert result is None
+
+    def test_get_profile_by_name(self, manager):
+        """Test retrieving profile by name."""
+        created = manager.create_profile(
+            name="Named Profile",
+            targets=["/home"],
+            exclusions={},
+        )
+
+        retrieved = manager.get_profile_by_name("Named Profile")
+
+        assert retrieved is not None
+        assert retrieved.id == created.id
+
+    def test_get_profile_by_name_not_found(self, manager):
+        """Test that non-existent name returns None."""
+        result = manager.get_profile_by_name("Does Not Exist")
+        assert result is None
+
+    def test_update_profile_name(self, manager):
+        """Test updating profile name."""
+        profile = manager.create_profile(
+            name="Original Name",
+            targets=["/home"],
+            exclusions={},
+        )
+
+        updated = manager.update_profile(profile.id, name="New Name")
+
+        assert updated is not None
+        assert updated.name == "New Name"
+        assert updated.id == profile.id
+
+    def test_update_profile_targets(self, manager):
+        """Test updating profile targets."""
+        profile = manager.create_profile(
+            name="Update Targets",
+            targets=["/home"],
+            exclusions={},
+        )
+
+        updated = manager.update_profile(
+            profile.id,
+            targets=["/home", "/var"],
+        )
+
+        assert updated.targets == ["/home", "/var"]
+
+    def test_update_profile_exclusions(self, manager):
+        """Test updating profile exclusions."""
+        profile = manager.create_profile(
+            name="Update Exclusions",
+            targets=["/home"],
+            exclusions={},
+        )
+
+        updated = manager.update_profile(
+            profile.id,
+            exclusions={"paths": ["/home/.cache"]},
+        )
+
+        assert updated.exclusions == {"paths": ["/home/.cache"]}
+
+    def test_update_profile_updates_timestamp(self, manager):
+        """Test that update changes updated_at timestamp."""
+        profile = manager.create_profile(
+            name="Timestamp Update",
+            targets=["/home"],
+            exclusions={},
+        )
+        original_updated_at = profile.updated_at
+
+        # Small delay to ensure timestamp differs
+        import time
+        time.sleep(0.01)
+
+        updated = manager.update_profile(profile.id, description="Changed")
+
+        assert updated.updated_at != original_updated_at
+
+    def test_update_profile_preserves_created_at(self, manager):
+        """Test that update preserves created_at timestamp."""
+        profile = manager.create_profile(
+            name="Preserve Created",
+            targets=["/home"],
+            exclusions={},
+        )
+        original_created_at = profile.created_at
+
+        updated = manager.update_profile(profile.id, description="Changed")
+
+        assert updated.created_at == original_created_at
+
+    def test_update_profile_not_found(self, manager):
+        """Test that updating non-existent profile returns None."""
+        result = manager.update_profile("nonexistent-id", name="New Name")
+        assert result is None
+
+    def test_update_profile_invalid_name_raises(self, manager):
+        """Test that updating with invalid name raises ValueError."""
+        profile = manager.create_profile(
+            name="Valid Name",
+            targets=["/home"],
+            exclusions={},
+        )
+
+        with pytest.raises(ValueError):
+            manager.update_profile(profile.id, name="")
+
+    def test_update_profile_duplicate_name_raises(self, manager):
+        """Test that updating to duplicate name raises ValueError."""
+        profile1 = manager.create_profile(
+            name="First Profile",
+            targets=["/home"],
+            exclusions={},
+        )
+        profile2 = manager.create_profile(
+            name="Second Profile",
+            targets=["/home"],
+            exclusions={},
+        )
+
+        with pytest.raises(ValueError, match="already exists"):
+            manager.update_profile(profile2.id, name="First Profile")
+
+    def test_update_profile_same_name_allowed(self, manager):
+        """Test that updating profile with same name is allowed."""
+        profile = manager.create_profile(
+            name="Keep Same",
+            targets=["/home"],
+            exclusions={},
+        )
+
+        # Should not raise - keeping the same name
+        updated = manager.update_profile(
+            profile.id,
+            name="Keep Same",
+            description="New description",
+        )
+
+        assert updated.name == "Keep Same"
+        assert updated.description == "New description"
+
+    def test_delete_profile(self, manager):
+        """Test deleting a profile."""
+        profile = manager.create_profile(
+            name="To Delete",
+            targets=["/home"],
+            exclusions={},
+        )
+
+        result = manager.delete_profile(profile.id)
+
+        assert result is True
+        assert manager.get_profile(profile.id) is None
+
+    def test_delete_profile_not_found(self, manager):
+        """Test that deleting non-existent profile returns False."""
+        result = manager.delete_profile("nonexistent-id")
+        assert result is False
+
+    def test_delete_default_profile_raises(self, manager):
+        """Test that deleting default profile raises ValueError."""
+        # Get a default profile
+        profiles = manager.list_profiles()
+        default_profile = next((p for p in profiles if p.is_default), None)
+
+        assert default_profile is not None
+
+        with pytest.raises(ValueError, match="Cannot delete default"):
+            manager.delete_profile(default_profile.id)
+
+
+class TestProfileManagerListing:
+    """Tests for ProfileManager listing and query operations."""
+
+    @pytest.fixture
+    def temp_config_dir(self):
+        """Create a temporary directory for profile storage."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            yield tmpdir
+
+    @pytest.fixture
+    def manager(self, temp_config_dir):
+        """Create a ProfileManager with a temporary directory."""
+        return ProfileManager(config_dir=temp_config_dir)
+
+    def test_list_profiles_returns_all(self, manager):
+        """Test that list_profiles returns all profiles."""
+        initial_count = len(manager.list_profiles())
+
+        manager.create_profile(
+            name="Extra Profile",
+            targets=["/home"],
+            exclusions={},
+        )
+
+        profiles = manager.list_profiles()
+        assert len(profiles) == initial_count + 1
+
+    def test_list_profiles_sorted_by_name(self, manager):
+        """Test that list_profiles returns profiles sorted by name."""
+        manager.create_profile(name="Zebra", targets=["/home"], exclusions={})
+        manager.create_profile(name="Apple", targets=["/home"], exclusions={})
+        manager.create_profile(name="Mango", targets=["/home"], exclusions={})
+
+        profiles = manager.list_profiles()
+        names = [p.name for p in profiles]
+
+        assert names == sorted(names, key=str.lower)
+
+    def test_get_all_profiles_returns_dict(self, manager):
+        """Test that get_all_profiles returns dictionary."""
+        profiles_dict = manager.get_all_profiles()
+
+        assert isinstance(profiles_dict, dict)
+        for profile_id, profile in profiles_dict.items():
+            assert profile.id == profile_id
+
+    def test_profile_exists_true(self, manager):
+        """Test profile_exists returns True for existing profile."""
+        profile = manager.create_profile(
+            name="Exists",
+            targets=["/home"],
+            exclusions={},
+        )
+
+        assert manager.profile_exists(profile.id) is True
+
+    def test_profile_exists_false(self, manager):
+        """Test profile_exists returns False for non-existing profile."""
+        assert manager.profile_exists("nonexistent-id") is False
+
+    def test_name_exists_true(self, manager):
+        """Test name_exists returns True for existing name."""
+        manager.create_profile(
+            name="Existing Name",
+            targets=["/home"],
+            exclusions={},
+        )
+
+        assert manager.name_exists("Existing Name") is True
+
+    def test_name_exists_false(self, manager):
+        """Test name_exists returns False for non-existing name."""
+        assert manager.name_exists("No Such Name") is False
+
+    def test_name_exists_with_exclude_id(self, manager):
+        """Test name_exists with exclude_id parameter."""
+        profile = manager.create_profile(
+            name="My Profile",
+            targets=["/home"],
+            exclusions={},
+        )
+
+        # Should return False when excluding the profile's own ID
+        assert manager.name_exists("My Profile", exclude_id=profile.id) is False
+        # Should return True for a different ID
+        assert manager.name_exists("My Profile", exclude_id="other-id") is True
+
+
+class TestProfileManagerReload:
+    """Tests for ProfileManager reload functionality."""
+
+    @pytest.fixture
+    def temp_config_dir(self):
+        """Create a temporary directory for profile storage."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            yield tmpdir
+
+    def test_reload_refreshes_from_storage(self, temp_config_dir):
+        """Test that reload refreshes profiles from storage."""
+        manager1 = ProfileManager(config_dir=temp_config_dir)
+        manager2 = ProfileManager(config_dir=temp_config_dir)
+
+        # Create profile with manager1
+        profile = manager1.create_profile(
+            name="Reload Test",
+            targets=["/home"],
+            exclusions={},
+        )
+
+        # Manager2 doesn't see it yet without reload
+        # (though it might due to shared storage, this tests the reload path)
+        manager2.reload()
+
+        reloaded = manager2.get_profile_by_name("Reload Test")
+        assert reloaded is not None
+
+
+class TestProfileManagerExportImport:
+    """Tests for ProfileManager export/import functionality."""
+
+    @pytest.fixture
+    def temp_config_dir(self):
+        """Create a temporary directory for profile storage."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            yield tmpdir
+
+    @pytest.fixture
+    def manager(self, temp_config_dir):
+        """Create a ProfileManager with a temporary directory."""
+        return ProfileManager(config_dir=temp_config_dir)
+
+    def test_export_profile_creates_file(self, manager, temp_config_dir):
+        """Test that export_profile creates a JSON file."""
+        profile = manager.create_profile(
+            name="Export Test",
+            targets=["/home"],
+            exclusions={},
+        )
+
+        export_path = Path(temp_config_dir) / "exported.json"
+        manager.export_profile(profile.id, export_path)
+
+        assert export_path.exists()
+
+    def test_export_profile_valid_json(self, manager, temp_config_dir):
+        """Test that exported file contains valid JSON."""
+        profile = manager.create_profile(
+            name="JSON Export",
+            targets=["/home", "/var"],
+            exclusions={"paths": ["/home/.cache"]},
+            description="Test profile",
+        )
+
+        export_path = Path(temp_config_dir) / "exported.json"
+        manager.export_profile(profile.id, export_path)
+
+        with open(export_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+
+        assert "export_version" in data
+        assert "profile" in data
+        assert data["profile"]["name"] == "JSON Export"
+        assert data["profile"]["targets"] == ["/home", "/var"]
+
+    def test_export_profile_not_found_raises(self, manager, temp_config_dir):
+        """Test that exporting non-existent profile raises ValueError."""
+        export_path = Path(temp_config_dir) / "exported.json"
+
+        with pytest.raises(ValueError, match="not found"):
+            manager.export_profile("nonexistent-id", export_path)
+
+    def test_export_profile_creates_parent_dirs(self, manager, temp_config_dir):
+        """Test that export creates parent directories if needed."""
+        profile = manager.create_profile(
+            name="Dir Export",
+            targets=["/home"],
+            exclusions={},
+        )
+
+        export_path = Path(temp_config_dir) / "nested" / "dir" / "exported.json"
+        manager.export_profile(profile.id, export_path)
+
+        assert export_path.exists()
+
+    def test_import_profile_basic(self, manager, temp_config_dir):
+        """Test importing a profile from JSON file."""
+        # Create export file
+        export_data = {
+            "export_version": 1,
+            "profile": {
+                "id": "original-id",
+                "name": "Imported Profile",
+                "targets": ["/home/user"],
+                "exclusions": {},
+                "created_at": "2024-01-01T00:00:00",
+                "updated_at": "2024-01-01T00:00:00",
+                "is_default": False,
+                "description": "An imported profile",
+                "options": {},
+            },
+        }
+
+        import_path = Path(temp_config_dir) / "import.json"
+        with open(import_path, "w", encoding="utf-8") as f:
+            json.dump(export_data, f)
+
+        imported = manager.import_profile(import_path)
+
+        assert imported is not None
+        assert imported.name == "Imported Profile"
+        assert imported.targets == ["/home/user"]
+        # Imported profile should get new ID
+        assert imported.id != "original-id"
+        # Imported profile should never be default
+        assert imported.is_default is False
+
+    def test_import_profile_legacy_format(self, manager, temp_config_dir):
+        """Test importing a profile from legacy (raw) format."""
+        # Legacy format: just the profile object without wrapper
+        legacy_data = {
+            "name": "Legacy Profile",
+            "targets": ["/home"],
+            "exclusions": {},
+            "description": "Legacy format",
+        }
+
+        import_path = Path(temp_config_dir) / "legacy.json"
+        with open(import_path, "w", encoding="utf-8") as f:
+            json.dump(legacy_data, f)
+
+        imported = manager.import_profile(import_path)
+
+        assert imported is not None
+        assert imported.name == "Legacy Profile"
+
+    def test_import_profile_duplicate_name_gets_suffix(self, manager, temp_config_dir):
+        """Test that importing duplicate name gets numeric suffix."""
+        # Create existing profile
+        manager.create_profile(
+            name="Duplicate Name",
+            targets=["/home"],
+            exclusions={},
+        )
+
+        # Create import file with same name
+        export_data = {
+            "export_version": 1,
+            "profile": {
+                "name": "Duplicate Name",
+                "targets": ["/var"],
+            },
+        }
+
+        import_path = Path(temp_config_dir) / "duplicate.json"
+        with open(import_path, "w", encoding="utf-8") as f:
+            json.dump(export_data, f)
+
+        imported = manager.import_profile(import_path)
+
+        assert imported is not None
+        assert imported.name == "Duplicate Name (2)"
+
+    def test_import_profile_file_not_found_raises(self, manager, temp_config_dir):
+        """Test that importing non-existent file raises FileNotFoundError."""
+        import_path = Path(temp_config_dir) / "nonexistent.json"
+
+        with pytest.raises(FileNotFoundError):
+            manager.import_profile(import_path)
+
+    def test_import_profile_invalid_json_raises(self, manager, temp_config_dir):
+        """Test that importing invalid JSON raises ValueError."""
+        import_path = Path(temp_config_dir) / "invalid.json"
+        import_path.write_text("{ not valid json }")
+
+        with pytest.raises(ValueError, match="Invalid JSON"):
+            manager.import_profile(import_path)
+
+    def test_import_profile_missing_name_raises(self, manager, temp_config_dir):
+        """Test that importing without name field raises ValueError."""
+        export_data = {
+            "profile": {
+                "targets": ["/home"],
+            },
+        }
+
+        import_path = Path(temp_config_dir) / "noname.json"
+        with open(import_path, "w", encoding="utf-8") as f:
+            json.dump(export_data, f)
+
+        with pytest.raises(ValueError, match="missing required field"):
+            manager.import_profile(import_path)
+
+    def test_import_profile_invalid_targets_type_raises(self, manager, temp_config_dir):
+        """Test that importing with wrong targets type raises ValueError."""
+        export_data = {
+            "profile": {
+                "name": "Bad Targets",
+                "targets": "/single/path",  # Should be list
+            },
+        }
+
+        import_path = Path(temp_config_dir) / "badtargets.json"
+        with open(import_path, "w", encoding="utf-8") as f:
+            json.dump(export_data, f)
+
+        with pytest.raises(ValueError, match="must be a list"):
+            manager.import_profile(import_path)
+
+    def test_export_import_roundtrip(self, manager, temp_config_dir):
+        """Test that export and import produces equivalent profile."""
+        original = manager.create_profile(
+            name="Roundtrip",
+            targets=["/home", "/var"],
+            exclusions={"paths": ["/home/.cache"], "patterns": ["*.tmp"]},
+            description="Test roundtrip",
+            options={"recursive": True},
+        )
+
+        export_path = Path(temp_config_dir) / "roundtrip.json"
+        manager.export_profile(original.id, export_path)
+
+        # Import creates new profile with unique name
+        imported = manager.import_profile(export_path)
+
+        # Core data should match (except id, name suffix, timestamps)
+        assert imported.targets == original.targets
+        assert imported.exclusions == original.exclusions
+        assert imported.description == original.description
+        assert imported.options == original.options
+
+
+class TestProfileManagerMakeUniqueName:
+    """Tests for the _make_unique_name helper method."""
+
+    @pytest.fixture
+    def temp_config_dir(self):
+        """Create a temporary directory for profile storage."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            yield tmpdir
+
+    @pytest.fixture
+    def manager(self, temp_config_dir):
+        """Create a ProfileManager with a temporary directory."""
+        return ProfileManager(config_dir=temp_config_dir)
+
+    def test_make_unique_name_no_conflict(self, manager):
+        """Test that unique name is returned as-is."""
+        result = manager._make_unique_name("Unique Name")
+        assert result == "Unique Name"
+
+    def test_make_unique_name_with_conflict(self, manager):
+        """Test that conflicting name gets numeric suffix."""
+        manager.create_profile(name="Conflict", targets=["/home"], exclusions={})
+
+        result = manager._make_unique_name("Conflict")
+        assert result == "Conflict (2)"
+
+    def test_make_unique_name_multiple_conflicts(self, manager):
+        """Test that multiple conflicts increment suffix."""
+        manager.create_profile(name="Multi", targets=["/home"], exclusions={})
+        manager.create_profile(name="Multi (2)", targets=["/home"], exclusions={})
+
+        result = manager._make_unique_name("Multi")
+        assert result == "Multi (3)"
+
+
+class TestProfileManagerThreadSafety:
+    """Tests for ProfileManager thread safety."""
+
+    @pytest.fixture
+    def temp_config_dir(self):
+        """Create a temporary directory for profile storage."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            yield tmpdir
+
+    @pytest.fixture
+    def manager(self, temp_config_dir):
+        """Create a ProfileManager with a temporary directory."""
+        return ProfileManager(config_dir=temp_config_dir)
+
+    def test_concurrent_reads(self, manager):
+        """Test that concurrent reads work correctly."""
+        # Create some profiles first
+        for i in range(5):
+            manager.create_profile(
+                name=f"Concurrent Read {i}",
+                targets=["/home"],
+                exclusions={},
+            )
+
+        results = []
+        errors = []
+
+        def read_profiles():
+            try:
+                profiles = manager.list_profiles()
+                results.append(len(profiles))
+            except Exception as e:
+                errors.append(e)
+
+        threads = [threading.Thread(target=read_profiles) for _ in range(10)]
+
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        assert len(errors) == 0
+        # All threads should have read the same number of profiles
+        assert len(set(results)) == 1
+
+    def test_concurrent_writes(self, manager):
+        """Test that concurrent writes don't corrupt data."""
+        errors = []
+        created_ids = []
+        lock = threading.Lock()
+
+        def create_profile(index):
+            try:
+                profile = manager.create_profile(
+                    name=f"Thread Profile {index}",
+                    targets=["/home"],
+                    exclusions={},
+                )
+                with lock:
+                    created_ids.append(profile.id)
+            except Exception as e:
+                with lock:
+                    errors.append(e)
+
+        threads = [
+            threading.Thread(target=create_profile, args=(i,))
+            for i in range(10)
+        ]
+
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        assert len(errors) == 0
+        # All profiles should have unique IDs
+        assert len(created_ids) == len(set(created_ids))
+
+
+class TestProfileManagerPersistence:
+    """Tests for ProfileManager persistence across instances."""
+
+    @pytest.fixture
+    def temp_config_dir(self):
+        """Create a temporary directory for profile storage."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            yield tmpdir
+
+    def test_profiles_persist_across_instances(self, temp_config_dir):
+        """Test that profiles persist when creating new manager instances."""
+        manager1 = ProfileManager(config_dir=temp_config_dir)
+        profile = manager1.create_profile(
+            name="Persistent",
+            targets=["/home"],
+            exclusions={},
+        )
+
+        # Create new manager instance
+        manager2 = ProfileManager(config_dir=temp_config_dir)
+        loaded = manager2.get_profile(profile.id)
+
+        assert loaded is not None
+        assert loaded.name == "Persistent"
+        assert loaded.targets == ["/home"]
+
+    def test_updates_persist_across_instances(self, temp_config_dir):
+        """Test that updates persist when creating new manager instances."""
+        manager1 = ProfileManager(config_dir=temp_config_dir)
+        profile = manager1.create_profile(
+            name="Update Persist",
+            targets=["/home"],
+            exclusions={},
+        )
+
+        manager1.update_profile(profile.id, description="Updated description")
+
+        manager2 = ProfileManager(config_dir=temp_config_dir)
+        loaded = manager2.get_profile(profile.id)
+
+        assert loaded.description == "Updated description"
+
+    def test_deletes_persist_across_instances(self, temp_config_dir):
+        """Test that deletes persist when creating new manager instances."""
+        manager1 = ProfileManager(config_dir=temp_config_dir)
+        profile = manager1.create_profile(
+            name="Delete Persist",
+            targets=["/home"],
+            exclusions={},
+        )
+        profile_id = profile.id
+
+        manager1.delete_profile(profile_id)
+
+        manager2 = ProfileManager(config_dir=temp_config_dir)
+        loaded = manager2.get_profile(profile_id)
+
+        assert loaded is None

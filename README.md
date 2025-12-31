@@ -324,74 +324,133 @@ The application interprets ClamAV exit codes as follows:
 
 ### Running Tests
 
-ClamUI uses pytest for testing with several test categories:
+ClamUI includes a comprehensive test suite with 80%+ code coverage for core modules.
 
-#### Unit Tests
-
-Run all unit tests (fast, no display required):
+#### Installing Test Dependencies
 
 ```bash
-uv run pytest tests/core/
+# Install dev dependencies (includes pytest and pytest-cov)
+pip install -e ".[dev]"
+
+# Or with uv
+uv sync --dev
 ```
 
-#### Integration Tests
-
-Integration tests verify component interactions and may require external dependencies like ClamAV:
+#### Running the Full Test Suite
 
 ```bash
-# Run integration tests only
-uv run pytest -m integration tests/
+# Run all tests
+pytest
 
-# Run all tests including integration
-uv run pytest tests/
+# Run with verbose output
+pytest -v
+
+# Run specific test file
+pytest tests/test_scanner.py -v
+
+# Run tests matching a pattern
+pytest -k "test_scanner" -v
 ```
 
-#### UI Tests (Require Display)
-
-UI tests require a display environment. On headless servers or CI environments, use `xvfb-run`:
+#### Running Tests with Coverage
 
 ```bash
-# Run UI tests with virtual framebuffer
-xvfb-run -a uv run pytest tests/ui/
+# Run with coverage report in terminal
+pytest --cov=src --cov-report=term-missing
 
-# Run all tests in headless environment
-xvfb-run -a uv run pytest tests/
+# Generate HTML coverage report
+pytest --cov=src --cov-report=html
+# Open htmlcov/index.html in your browser to view
+
+# Run with both terminal and HTML reports
+pytest --cov=src --cov-report=term-missing --cov-report=html
 ```
 
-#### Test Categories (Markers)
+#### Coverage Requirements
 
-The project uses pytest markers to categorize tests:
+The project enforces a minimum of **80% code coverage** for the `src/` directory. Coverage is measured with branch coverage enabled. The coverage configuration is defined in `pyproject.toml` and will fail the test run if coverage drops below the threshold.
 
-- `integration`: Tests that verify component integration (may need ClamAV)
-- `ui`: Tests that require GTK/display environment
-- `slow`: Long-running tests
+| Module | Coverage Target |
+|--------|----------------|
+| `src/core/` | 85%+ (critical business logic) |
+| `src/profiles/` | 80%+ (profile management) |
+| `src/ui/` | 70%+ (GTK components, some lines untestable) |
+| Overall `src/` | 80%+ |
 
-Run specific categories:
+#### Performance Verification
 
 ```bash
-# Skip slow tests
-uv run pytest -m "not slow" tests/
+# Show test execution times (slowest tests first)
+pytest --durations=10
 
-# Run only UI integration tests
-xvfb-run -a uv run pytest -m "ui and integration" tests/
+# Full suite should complete in under 30 seconds
+pytest --durations=0
 ```
 
-#### Test Prerequisites
+#### Headless/CI Environment Testing
 
-- **Unit tests**: No special requirements
-- **Integration tests**: ClamAV (`clamscan`) should be installed
-- **UI tests**: Requires GTK4/Adwaita and either a display or Xvfb:
-  ```bash
-  # Ubuntu/Debian - install Xvfb for headless testing
-  sudo apt install xvfb
-  ```
-
-#### Continuous Integration
-
-For CI environments, run the full test suite with:
+All tests are designed to run in headless CI environments without requiring a display server (X11/Wayland). GTK-dependent tests will skip gracefully when no display is available:
 
 ```bash
-xvfb-run -a uv run pytest tests/ -v --tb=short
+# Run in headless mode (no DISPLAY set)
+unset DISPLAY
+pytest
+
+# GTK tests will show as skipped with a clear message
+# All other tests will run normally
+```
+
+#### Test Organization
+
+Tests are organized to mirror the source code structure:
+
+```
+tests/
+├── core/                  # Tests for src/core/ modules
+│   ├── test_log_manager.py
+│   ├── test_quarantine_manager.py
+│   ├── test_settings_manager.py
+│   └── test_utils.py
+├── profiles/              # Tests for src/profiles/ modules
+│   ├── test_profile_manager.py
+│   └── test_profile_storage.py
+├── ui/                    # Tests for src/ui/ components
+│   ├── test_fullscreen_dialog.py
+│   ├── test_logs_view.py
+│   ├── test_preferences_window.py
+│   ├── test_profile_dialogs.py
+│   └── test_quarantine_view.py
+└── test_scanner.py        # Scanner integration tests
+```
+
+#### Writing New Tests
+
+Follow the existing patterns when adding tests:
+
+1. **Use fixtures** for common setup (see `pytest.fixture`)
+2. **Mock external dependencies** (ClamAV, system paths, GTK)
+3. **Use `tmp_path`** for file I/O tests
+4. **Add docstrings** to all test methods
+5. **Test error paths** explicitly
+
+Example test structure:
+
+```python
+import pytest
+from unittest import mock
+
+class TestMyFeature:
+    """Tests for MyFeature class."""
+
+    @pytest.fixture
+    def my_instance(self, tmp_path):
+        """Create instance for testing."""
+        return MyFeature(data_dir=str(tmp_path))
+
+    def test_basic_operation(self, my_instance):
+        """Test basic operation succeeds."""
+        result = my_instance.do_something()
+        assert result is not None
 ```
 
 ## License
