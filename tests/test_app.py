@@ -449,3 +449,248 @@ class TestClamUIAppQuickScanProfile:
         # Profile manager should not be queried without scan view
         # (the method exits early when scan_view is None)
         mock_window.set_content_view.assert_not_called()
+
+
+class TestClamUIAppTrayQuickScan:
+    """Tests for Tray Menu Quick Scan profile retrieval and application."""
+
+    def test_on_tray_quick_scan_handler_exists(self, app):
+        """Test that the _on_tray_quick_scan handler method exists."""
+        assert hasattr(app, '_on_tray_quick_scan')
+        assert callable(app._on_tray_quick_scan)
+
+    def test_do_tray_quick_scan_handler_exists(self, app):
+        """Test that the _do_tray_quick_scan handler method exists."""
+        assert hasattr(app, '_do_tray_quick_scan')
+        assert callable(app._do_tray_quick_scan)
+
+    def test_do_tray_quick_scan_switches_to_scan_view(self, app, mock_gtk_modules):
+        """Test that _do_tray_quick_scan switches to scan view."""
+        # Set up mocks
+        mock_window = mock.MagicMock()
+        app.props = mock.MagicMock()
+        app.props.active_window = mock_window
+
+        mock_scan_view = mock.MagicMock()
+        app._scan_view = mock_scan_view
+        app._current_view = "statistics"
+
+        # Mock profile retrieval to return None (fallback path)
+        app._profile_manager = mock.MagicMock()
+        app._profile_manager.get_profile_by_name.return_value = None
+
+        # Mock activate to just set up the window
+        app.activate = mock.MagicMock()
+
+        # Call the handler
+        app._do_tray_quick_scan()
+
+        # Verify view switch
+        mock_window.set_content_view.assert_called_once_with(mock_scan_view)
+        mock_window.set_active_view.assert_called_once_with("scan")
+        assert app._current_view == "scan"
+
+    def test_do_tray_quick_scan_applies_quick_scan_profile(self, app, mock_gtk_modules):
+        """Test that _do_tray_quick_scan applies the Quick Scan profile."""
+        # Set up mocks
+        mock_window = mock.MagicMock()
+        app.props = mock.MagicMock()
+        app.props.active_window = mock_window
+
+        mock_scan_view = mock.MagicMock()
+        app._scan_view = mock_scan_view
+        app._current_view = "statistics"
+
+        # Mock profile retrieval to return a profile
+        mock_profile = mock.MagicMock()
+        mock_profile.id = "quick-scan-profile-id"
+        mock_profile.name = "Quick Scan"
+        app._profile_manager = mock.MagicMock()
+        app._profile_manager.get_profile_by_name.return_value = mock_profile
+
+        # Mock activate
+        app.activate = mock.MagicMock()
+
+        # Call the handler
+        app._do_tray_quick_scan()
+
+        # Verify profile is applied
+        mock_scan_view.refresh_profiles.assert_called_once()
+        mock_scan_view.set_selected_profile.assert_called_once_with("quick-scan-profile-id")
+
+    def test_do_tray_quick_scan_starts_scan_after_profile_application(self, app, mock_gtk_modules):
+        """Test that _do_tray_quick_scan starts the scan after applying profile."""
+        # Set up mocks
+        mock_window = mock.MagicMock()
+        app.props = mock.MagicMock()
+        app.props.active_window = mock_window
+
+        mock_scan_view = mock.MagicMock()
+        app._scan_view = mock_scan_view
+        app._current_view = "statistics"
+
+        # Mock profile retrieval to return a profile
+        mock_profile = mock.MagicMock()
+        mock_profile.id = "quick-scan-profile-id"
+        mock_profile.name = "Quick Scan"
+        app._profile_manager = mock.MagicMock()
+        app._profile_manager.get_profile_by_name.return_value = mock_profile
+
+        # Mock activate
+        app.activate = mock.MagicMock()
+
+        # Call the handler
+        app._do_tray_quick_scan()
+
+        # Verify scan is started (unlike statistics quick scan, tray auto-starts)
+        mock_scan_view._start_scan.assert_called_once()
+
+    def test_do_tray_quick_scan_falls_back_to_home_when_profile_missing(
+        self, app, mock_gtk_modules
+    ):
+        """Test that _do_tray_quick_scan falls back to home directory when profile not found."""
+        # Set up mocks
+        mock_window = mock.MagicMock()
+        app.props = mock.MagicMock()
+        app.props.active_window = mock_window
+
+        mock_scan_view = mock.MagicMock()
+        app._scan_view = mock_scan_view
+        app._current_view = "statistics"
+
+        # Mock profile retrieval to return None
+        app._profile_manager = mock.MagicMock()
+        app._profile_manager.get_profile_by_name.return_value = None
+
+        # Mock activate
+        app.activate = mock.MagicMock()
+
+        # Call the handler
+        with mock.patch('src.app.os.path.expanduser') as mock_expanduser:
+            mock_expanduser.return_value = "/home/testuser"
+            app._do_tray_quick_scan()
+
+            # Verify fallback to home directory
+            mock_scan_view._set_selected_path.assert_called_once_with("/home/testuser")
+        # Verify set_selected_profile was NOT called
+        mock_scan_view.set_selected_profile.assert_not_called()
+
+    def test_do_tray_quick_scan_starts_scan_in_fallback_case(self, app, mock_gtk_modules):
+        """Test that _do_tray_quick_scan starts scan even when falling back to home directory."""
+        # Set up mocks
+        mock_window = mock.MagicMock()
+        app.props = mock.MagicMock()
+        app.props.active_window = mock_window
+
+        mock_scan_view = mock.MagicMock()
+        app._scan_view = mock_scan_view
+        app._current_view = "statistics"
+
+        # Mock profile retrieval to return None
+        app._profile_manager = mock.MagicMock()
+        app._profile_manager.get_profile_by_name.return_value = None
+
+        # Mock activate
+        app.activate = mock.MagicMock()
+
+        # Call the handler
+        app._do_tray_quick_scan()
+
+        # Verify scan is started even in fallback case
+        mock_scan_view._start_scan.assert_called_once()
+
+    def test_do_tray_quick_scan_calls_activate(self, app, mock_gtk_modules):
+        """Test that _do_tray_quick_scan activates the application."""
+        # Set up mocks
+        mock_window = mock.MagicMock()
+        app.props = mock.MagicMock()
+        app.props.active_window = mock_window
+
+        mock_scan_view = mock.MagicMock()
+        app._scan_view = mock_scan_view
+
+        # Mock profile retrieval
+        mock_profile = mock.MagicMock()
+        mock_profile.id = "quick-scan-profile-id"
+        app._profile_manager = mock.MagicMock()
+        app._profile_manager.get_profile_by_name.return_value = mock_profile
+
+        # Mock activate
+        app.activate = mock.MagicMock()
+
+        # Call the handler
+        app._do_tray_quick_scan()
+
+        # Verify activate was called
+        app.activate.assert_called_once()
+
+    def test_do_tray_quick_scan_no_action_without_window(self, app, mock_gtk_modules):
+        """Test that _do_tray_quick_scan does nothing without active window."""
+        app.props = mock.MagicMock()
+        app.props.active_window = None
+
+        mock_scan_view = mock.MagicMock()
+        app._scan_view = mock_scan_view
+
+        # Mock activate
+        app.activate = mock.MagicMock()
+
+        # Call the handler
+        app._do_tray_quick_scan()
+
+        # Verify no scan view methods were called
+        mock_scan_view.refresh_profiles.assert_not_called()
+        mock_scan_view.set_selected_profile.assert_not_called()
+        mock_scan_view._start_scan.assert_not_called()
+
+    def test_do_tray_quick_scan_no_action_without_scan_view(self, app, mock_gtk_modules):
+        """Test that _do_tray_quick_scan does nothing without scan view."""
+        mock_window = mock.MagicMock()
+        app.props = mock.MagicMock()
+        app.props.active_window = mock_window
+        app._scan_view = None
+
+        # Mock activate
+        app.activate = mock.MagicMock()
+
+        # Call the handler - should not crash and not do anything
+        result = app._do_tray_quick_scan()
+
+        # Verify returns False (don't repeat)
+        assert result is False
+
+    def test_do_tray_quick_scan_returns_false(self, app, mock_gtk_modules):
+        """Test that _do_tray_quick_scan returns False (to prevent GLib.idle_add repeat)."""
+        # Set up mocks
+        mock_window = mock.MagicMock()
+        app.props = mock.MagicMock()
+        app.props.active_window = mock_window
+
+        mock_scan_view = mock.MagicMock()
+        app._scan_view = mock_scan_view
+
+        # Mock profile retrieval
+        mock_profile = mock.MagicMock()
+        mock_profile.id = "quick-scan-profile-id"
+        app._profile_manager = mock.MagicMock()
+        app._profile_manager.get_profile_by_name.return_value = mock_profile
+
+        # Mock activate
+        app.activate = mock.MagicMock()
+
+        # Call the handler
+        result = app._do_tray_quick_scan()
+
+        # Verify returns False (to stop GLib.idle_add repetition)
+        assert result is False
+
+    def test_on_tray_quick_scan_uses_glib_idle_add(self, app, mock_gtk_modules):
+        """Test that _on_tray_quick_scan delegates to _do_tray_quick_scan via GLib.idle_add."""
+        # This test verifies the thread-safety mechanism
+        mock_glib = mock_gtk_modules["GLib"]
+
+        # Call the handler
+        app._on_tray_quick_scan()
+
+        # Verify GLib.idle_add was called with _do_tray_quick_scan
+        mock_glib.idle_add.assert_called_once_with(app._do_tray_quick_scan)
