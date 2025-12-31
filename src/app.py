@@ -116,6 +116,9 @@ class ClamUIApp(Adw.Application):
             self._components_view = ComponentsView()
             self._statistics_view = StatisticsView()
 
+            # Connect statistics view quick scan callback
+            self._statistics_view.set_quick_scan_callback(self._on_statistics_quick_scan)
+
             # Connect scan state callback for tray integration
             self._scan_view.set_scan_state_callback(self._on_scan_state_changed)
 
@@ -294,6 +297,26 @@ class ClamUIApp(Adw.Application):
             win.set_content_view(self._statistics_view)
             win.set_active_view("statistics")
             self._current_view = "statistics"
+
+    def _on_statistics_quick_scan(self):
+        """
+        Handle Quick Scan action from statistics view.
+
+        Switches to scan view and pre-selects the home directory as the scan target.
+        Does not automatically start the scan - user must click Start Scan.
+        """
+        win = self.props.active_window
+        if win and self._scan_view:
+            # Switch to scan view
+            win.set_content_view(self._scan_view)
+            win.set_active_view("scan")
+            self._current_view = "scan"
+
+            # Pre-select home directory as scan target
+            home_dir = os.path.expanduser("~")
+            self._scan_view._set_selected_path(home_dir)
+
+            logger.info("Quick scan target set to home directory from statistics view")
 
     def _on_about(self, action, param):
         """Handle about action - show about dialog."""
