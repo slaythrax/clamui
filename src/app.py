@@ -380,7 +380,8 @@ class ClamUIApp(Adw.Application):
         """
         Handle Quick Scan action from statistics view.
 
-        Switches to scan view and pre-selects the home directory as the scan target.
+        Switches to scan view and applies the Quick Scan profile.
+        Falls back to home directory if the profile is not found.
         Does not automatically start the scan - user must click Start Scan.
         """
         win = self.props.active_window
@@ -390,11 +391,19 @@ class ClamUIApp(Adw.Application):
             win.set_active_view("scan")
             self._current_view = "scan"
 
-            # Pre-select home directory as scan target
-            home_dir = os.path.expanduser("~")
-            self._scan_view._set_selected_path(home_dir)
-
-            logger.info("Quick scan target set to home directory from statistics view")
+            # Try to use Quick Scan profile
+            quick_scan_profile = self._get_quick_scan_profile()
+            if quick_scan_profile:
+                # Refresh profiles to ensure list is up to date
+                self._scan_view.refresh_profiles()
+                # Apply the Quick Scan profile
+                self._scan_view.set_selected_profile(quick_scan_profile.id)
+                logger.info("Quick Scan profile applied from statistics view")
+            else:
+                # Fallback to home directory if profile not found
+                home_dir = os.path.expanduser("~")
+                self._scan_view._set_selected_path(home_dir)
+                logger.warning("Quick Scan profile not found, falling back to home directory")
 
     def _on_show_quarantine(self, action, param):
         """Handle show-quarantine action - switch to quarantine view."""
