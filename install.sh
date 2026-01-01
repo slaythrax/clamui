@@ -390,31 +390,37 @@ install_xdg_files() {
 
     # Install desktop entry
     log_info "Installing desktop entry to $DESKTOP_DIR..."
-    if [ -f "$SCRIPT_DIR/com.github.clamui.desktop" ]; then
-        cp "$SCRIPT_DIR/com.github.clamui.desktop" "$DESKTOP_DIR/"
-        log_success "Desktop entry installed: $DESKTOP_DIR/com.github.clamui.desktop"
+    if [ -f "$SCRIPT_DIR/com.github.rooki.clamui.desktop" ]; then
+        cp "$SCRIPT_DIR/com.github.rooki.clamui.desktop" "$DESKTOP_DIR/"
+        log_success "Desktop entry installed: $DESKTOP_DIR/com.github.rooki.clamui.desktop"
     else
-        log_error "Desktop entry file not found: $SCRIPT_DIR/com.github.clamui.desktop"
+        log_error "Desktop entry file not found: $SCRIPT_DIR/com.github.rooki.clamui.desktop"
         return 1
     fi
 
-    # Install application icon
-    log_info "Installing application icon to $ICON_DIR..."
-    if [ -f "$SCRIPT_DIR/icons/com.github.clamui.svg" ]; then
-        cp "$SCRIPT_DIR/icons/com.github.clamui.svg" "$ICON_DIR/"
-        log_success "Icon installed: $ICON_DIR/com.github.clamui.svg"
+    # Install application icons (both SVG and PNG for tray icon support)
+    log_info "Installing application icons to $ICON_DIR..."
+    if [ -f "$SCRIPT_DIR/icons/com.github.rooki.clamui.svg" ]; then
+        cp "$SCRIPT_DIR/icons/com.github.rooki.clamui.svg" "$ICON_DIR/"
+        log_success "SVG icon installed: $ICON_DIR/com.github.rooki.clamui.svg"
     else
-        log_warning "Icon file not found: $SCRIPT_DIR/icons/com.github.clamui.svg"
-        log_warning "Application will use default icon"
+        log_warning "SVG icon file not found: $SCRIPT_DIR/icons/com.github.rooki.clamui.svg"
+    fi
+    if [ -f "$SCRIPT_DIR/icons/com.github.rooki.clamui.png" ]; then
+        cp "$SCRIPT_DIR/icons/com.github.rooki.clamui.png" "$ICON_DIR/"
+        log_success "PNG icon installed: $ICON_DIR/com.github.rooki.clamui.png"
+    else
+        log_warning "PNG icon file not found: $SCRIPT_DIR/icons/com.github.rooki.clamui.png"
+        log_warning "Tray icon may use default theme icon"
     fi
 
     # Install Nemo file manager action
     log_info "Installing Nemo action to $NEMO_ACTION_DIR..."
-    if [ -f "$SCRIPT_DIR/com.github.clamui.nemo_action" ]; then
-        cp "$SCRIPT_DIR/com.github.clamui.nemo_action" "$NEMO_ACTION_DIR/"
-        log_success "Nemo action installed: $NEMO_ACTION_DIR/com.github.clamui.nemo_action"
+    if [ -f "$SCRIPT_DIR/com.github.rooki.clamui.nemo_action" ]; then
+        cp "$SCRIPT_DIR/com.github.rooki.clamui.nemo_action" "$NEMO_ACTION_DIR/"
+        log_success "Nemo action installed: $NEMO_ACTION_DIR/com.github.rooki.clamui.nemo_action"
     else
-        log_warning "Nemo action file not found: $SCRIPT_DIR/com.github.clamui.nemo_action"
+        log_warning "Nemo action file not found: $SCRIPT_DIR/com.github.rooki.clamui.nemo_action"
         log_warning "Nemo context menu integration will not be available"
     fi
 

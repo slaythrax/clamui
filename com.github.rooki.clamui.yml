@@ -140,6 +140,7 @@ modules:
       - pip3 install --prefix=/app --no-deps --no-build-isolation .
       - install -Dm644 com.github.rooki.clamui.desktop /app/share/applications/com.github.rooki.clamui.desktop
       - install -Dm644 icons/com.github.rooki.clamui.svg /app/share/icons/hicolor/scalable/apps/com.github.rooki.clamui.svg
+      - install -Dm644 icons/com.github.rooki.clamui.png /app/share/icons/hicolor/scalable/apps/com.github.rooki.clamui.png
     sources:
       - type: dir
         path: .

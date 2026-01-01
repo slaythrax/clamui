@@ -939,6 +939,11 @@ class ScanView(Gtk.Box):
         self._scanner.cancel()
         self._set_scanning_state(False)
 
+        # Update placeholder to show cancellation
+        self._results_placeholder.set_text("Scan cancelled")
+        self._results_placeholder.set_visible(True)
+        self._threats_listbox.set_visible(False)
+
     def _start_scan(self):
         """Start the scanning process."""
         self._set_scanning_state(True)
@@ -1111,6 +1116,11 @@ class ScanView(Gtk.Box):
                 self._status_banner.add_css_class("error")
                 self._status_banner.remove_css_class("success")
                 self._status_banner.remove_css_class("warning")
+        elif result.status == ScanStatus.CANCELLED:
+            self._status_banner.set_title("Scan cancelled")
+            self._status_banner.add_css_class("warning")
+            self._status_banner.remove_css_class("success")
+            self._status_banner.remove_css_class("error")
         else:  # ERROR status
             self._status_banner.set_title(f"Scan error: {result.error_message}")
             self._status_banner.add_css_class("warning")
@@ -1172,6 +1182,12 @@ class ScanView(Gtk.Box):
                 result.scanned_files, result.scanned_files, result.scanned_dirs
             )
             self._threats_listbox.append(summary_row)
+
+        elif result.status == ScanStatus.CANCELLED:
+            # CANCELLED status - show cancellation message in placeholder
+            self._threats_listbox.set_visible(False)
+            self._results_placeholder.set_visible(True)
+            self._results_placeholder.set_text("Scan cancelled by user")
 
         else:
             # ERROR status - show error message in placeholder

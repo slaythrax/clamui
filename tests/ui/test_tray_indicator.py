@@ -686,10 +686,12 @@ class TestTrayIndicatorUpdateStatus:
         indicator._indicator = mock_indicator
         indicator._available = True
 
-        with mock.patch.object(indicator, '_resolve_icon', return_value='security-high-symbolic') as mock_resolve:
-            indicator.update_status("unknown_status")
-            # Should be called with 'protected' after falling back
-            mock_resolve.assert_called_with("protected")
+        # Mock _get_clamui_icon to return None so _resolve_icon path is taken
+        with mock.patch.object(indicator, '_get_clamui_icon', return_value=None):
+            with mock.patch.object(indicator, '_resolve_icon', return_value='security-high-symbolic') as mock_resolve:
+                indicator.update_status("unknown_status")
+                # Should be called with 'protected' after falling back
+                mock_resolve.assert_called_with("protected")
 
     def test_update_status_valid_statuses(self, mock_gtk_modules):
         """Test update_status accepts all valid statuses."""
@@ -704,10 +706,12 @@ class TestTrayIndicatorUpdateStatus:
 
         valid_statuses = ["protected", "warning", "scanning", "threat"]
 
-        for status in valid_statuses:
-            with mock.patch.object(indicator, '_resolve_icon', return_value='icon-name'):
-                indicator.update_status(status)
-                assert indicator._current_status == status
+        # Mock _get_clamui_icon to return None so theme icon path is taken
+        with mock.patch.object(indicator, '_get_clamui_icon', return_value=None):
+            for status in valid_statuses:
+                with mock.patch.object(indicator, '_resolve_icon', return_value='icon-name'):
+                    indicator.update_status(status)
+                    assert indicator._current_status == status
 
 
 class TestTrayIndicatorUpdateScanProgress:
