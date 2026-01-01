@@ -137,6 +137,9 @@ class TrayManager:
 
         return None
 
+    # Maximum size for JSON messages from subprocess (1MB)
+    MAX_MESSAGE_SIZE = 1024 * 1024  # 1MB
+
     def _read_stdout(self) -> None:
         """Read messages from the subprocess stdout."""
         try:
@@ -152,8 +155,22 @@ class TrayManager:
                 if not line:
                     continue
 
+                # Security: Limit message size to prevent memory exhaustion
+                if len(line) > self.MAX_MESSAGE_SIZE:
+                    logger.error(
+                        f"Message from tray service exceeds size limit "
+                        f"({len(line)} > {self.MAX_MESSAGE_SIZE} bytes)"
+                    )
+                    continue
+
                 try:
                     message = json.loads(line)
+
+                    # Security: Validate message structure is not excessively nested
+                    if not self._validate_message_structure(message):
+                        logger.error("Message from tray service has invalid structure")
+                        continue
+
                     self._handle_message(message)
                 except json.JSONDecodeError as e:
                     logger.error(f"Invalid JSON from tray service: {e}")
@@ -162,6 +179,50 @@ class TrayManager:
             logger.error(f"Error reading tray service stdout: {e}")
         finally:
             logger.debug("Tray service stdout reader ended")
+
+    # Maximum nesting depth for JSON messages
+    MAX_NESTING_DEPTH = 10
+
+    def _validate_message_structure(
+        self, obj: object, depth: int = 0
+    ) -> bool:
+        """
+        Validate that a JSON message has a safe structure.
+
+        Checks for:
+        - Excessive nesting depth (could cause stack overflow)
+        - Valid message type (must be a dict with expected fields)
+
+        Args:
+            obj: The parsed JSON object to validate
+            depth: Current nesting depth (for recursion)
+
+        Returns:
+            True if the structure is valid, False otherwise
+        """
+        # Check nesting depth
+        if depth > self.MAX_NESTING_DEPTH:
+            return False
+
+        if isinstance(obj, dict):
+            # Top-level message must have an "event" field
+            if depth == 0 and "event" not in obj:
+                return False
+
+            # Recursively check nested structures
+            for value in obj.values():
+                if not self._validate_message_structure(value, depth + 1):
+                    return False
+
+        elif isinstance(obj, list):
+            # Recursively check list items
+            for item in obj:
+                if not self._validate_message_structure(item, depth + 1):
+                    return False
+
+        # Primitive types (str, int, float, bool, None) are always valid
+
+        return True
 
     def _read_stderr(self) -> None:
         """Read and log stderr from the subprocess."""

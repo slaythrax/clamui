@@ -308,6 +308,74 @@ def check_clamd_connection(socket_path: Optional[str] = None) -> Tuple[bool, Opt
         return (False, f"Error connecting to clamd: {str(e)}")
 
 
+def check_symlink_safety(path: Path) -> Tuple[bool, Optional[str]]:
+    """
+    Check if a path involves symlinks and if they are safe.
+
+    Detects symlinks that could be used for path traversal attacks by
+    checking if the resolved path escapes common protected directories.
+
+    Args:
+        path: Path object to check
+
+    Returns:
+        Tuple of (is_safe, warning_message):
+        - (True, None) if path is safe
+        - (True, warning_message) if path is a symlink but safe
+        - (False, error_message) if path is potentially dangerous
+    """
+    try:
+        # Check if the path itself is a symlink
+        if not path.is_symlink():
+            return (True, None)
+
+        # Get the resolved target
+        resolved = path.resolve()
+
+        # Check if the symlink target exists
+        if not resolved.exists():
+            return (False, f"Symlink target does not exist: {path} -> {resolved}")
+
+        # Define protected system directories that symlinks should not escape to
+        # when the original path is in a user directory
+        protected_dirs = [
+            Path("/etc"),
+            Path("/var"),
+            Path("/usr"),
+            Path("/bin"),
+            Path("/sbin"),
+            Path("/lib"),
+            Path("/lib64"),
+            Path("/boot"),
+            Path("/root"),
+        ]
+
+        # Get the original path's parent directory
+        original_parent = path.parent.resolve()
+
+        # If the original path is in a user-writable location (like /home or /tmp),
+        # check if the symlink escapes to a protected system directory
+        user_dirs = [Path("/home"), Path("/tmp"), Path("/var/tmp")]
+        is_in_user_dir = any(
+            str(original_parent).startswith(str(user_dir))
+            for user_dir in user_dirs
+        )
+
+        if is_in_user_dir:
+            for protected in protected_dirs:
+                if str(resolved).startswith(str(protected)):
+                    return (
+                        False,
+                        f"Symlink escapes to protected directory: {path} -> {resolved}"
+                    )
+
+        # Symlink is present but appears safe
+        return (True, f"Path is a symlink: {path} -> {resolved}")
+
+    except (OSError, RuntimeError) as e:
+        return (False, f"Error checking symlink: {str(e)}")
+
+
 def validate_path(path: str) -> Tuple[bool, Optional[str]]:
     """
     Validate a path for scanning.
@@ -316,6 +384,7 @@ def validate_path(path: str) -> Tuple[bool, Optional[str]]:
     - Is not empty
     - Exists on the filesystem
     - Is readable by the current user
+    - Is not a dangerous symlink
 
     Args:
         path: The filesystem path to validate
@@ -329,9 +398,17 @@ def validate_path(path: str) -> Tuple[bool, Optional[str]]:
     if not path or not path.strip():
         return (False, "No path specified")
 
+    # Convert to Path object for checks
+    path_obj = Path(path)
+
+    # Check for dangerous symlinks before resolving
+    is_safe, symlink_msg = check_symlink_safety(path_obj)
+    if not is_safe:
+        return (False, symlink_msg)
+
     # Normalize and resolve the path
     try:
-        resolved_path = Path(path).resolve()
+        resolved_path = path_obj.resolve()
     except (OSError, RuntimeError) as e:
         return (False, f"Invalid path format: {str(e)}")
 

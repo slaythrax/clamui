@@ -260,9 +260,27 @@ class SecureFileHandler:
             ...     print(f"Quarantined: {result.destination_path}")
             ...     print(f"Hash: {result.file_hash}")
         """
-        source = Path(source_path).resolve()
+        source_path_obj = Path(source_path)
 
         with self._lock:
+            # Security check: Reject symlinks to prevent symlink attacks
+            # A malicious symlink could point to system files or escape quarantine
+            if source_path_obj.is_symlink():
+                target = source_path_obj.resolve()
+                return FileOperationResult(
+                    status=FileOperationStatus.ERROR,
+                    source_path=source_path,
+                    destination_path=None,
+                    file_size=0,
+                    file_hash="",
+                    error_message=(
+                        f"Cannot quarantine symlinks for security reasons: "
+                        f"{source_path} -> {target}"
+                    )
+                )
+
+            source = source_path_obj.resolve()
+
             # Validate source file exists
             if not source.exists():
                 return FileOperationResult(
