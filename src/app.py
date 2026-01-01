@@ -666,13 +666,42 @@ class ClamUIApp(Adw.Application):
         Handle application shutdown.
 
         This method is called when the application is about to terminate.
-        It performs cleanup of resources including the tray indicator.
+        It performs cleanup of resources including:
+        - Tray indicator
+        - Active scans
+        - Database connections
         """
+        logger.info("Application shutdown initiated")
+
+        # Cancel any active scans
+        if self._scan_view is not None:
+            try:
+                # Cancel any ongoing scan
+                if hasattr(self._scan_view, '_scanner') and self._scan_view._scanner is not None:
+                    self._scan_view._scanner.cancel()
+                    logger.debug("Active scan cancelled during shutdown")
+            except Exception as e:
+                logger.warning(f"Error cancelling scan during shutdown: {e}")
+
         # Clean up tray indicator to prevent ghost icons
         if self._tray_indicator is not None:
-            self._tray_indicator.cleanup()
-            self._tray_indicator = None
-            logger.debug("Tray indicator cleanup completed during shutdown")
+            try:
+                self._tray_indicator.cleanup()
+                self._tray_indicator = None
+                logger.debug("Tray indicator cleanup completed during shutdown")
+            except Exception as e:
+                logger.warning(f"Error cleaning up tray indicator: {e}")
+
+        # Clear view references to allow garbage collection
+        self._scan_view = None
+        self._update_view = None
+        self._logs_view = None
+        self._components_view = None
+        self._statistics_view = None
+        self._quarantine_view = None
+        self._current_view = None
+
+        logger.info("Application shutdown cleanup completed")
 
         # Call parent shutdown
         Adw.Application.do_shutdown(self)

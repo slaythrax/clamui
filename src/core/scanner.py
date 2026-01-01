@@ -300,9 +300,18 @@ class Scanner:
                 text=True
             )
 
-            stdout, stderr = self._current_process.communicate()
-            exit_code = self._current_process.returncode
-            self._current_process = None
+            try:
+                stdout, stderr = self._current_process.communicate()
+                exit_code = self._current_process.returncode
+            finally:
+                # Ensure process is cleaned up even if communicate() raises
+                if self._current_process is not None:
+                    try:
+                        self._current_process.kill()
+                        self._current_process.wait(timeout=5)
+                    except (OSError, ProcessLookupError, subprocess.TimeoutExpired):
+                        pass
+                    self._current_process = None
 
             # Check if cancelled during execution
             if self._scan_cancelled:

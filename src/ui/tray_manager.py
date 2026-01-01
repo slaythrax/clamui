@@ -34,6 +34,9 @@ class TrayManager:
         """Initialize the TrayManager."""
         self._process: Optional[subprocess.Popen] = None
         self._reader_thread: Optional[threading.Thread] = None
+
+        # Thread lock for shared state accessed by reader threads
+        self._state_lock = threading.Lock()
         self._running = False
         self._ready = False
         self._current_status = "protected"
@@ -88,7 +91,8 @@ class TrayManager:
                 env=env,
             )
 
-            self._running = True
+            with self._state_lock:
+                self._running = True
 
             # Start reader thread for stdout
             self._reader_thread = threading.Thread(
@@ -140,8 +144,9 @@ class TrayManager:
                 return
 
             for line in self._process.stdout:
-                if not self._running:
-                    break
+                with self._state_lock:
+                    if not self._running:
+                        break
 
                 line = line.strip()
                 if not line:
@@ -165,8 +170,9 @@ class TrayManager:
                 return
 
             for line in self._process.stderr:
-                if not self._running:
-                    break
+                with self._state_lock:
+                    if not self._running:
+                        break
                 line = line.strip()
                 if line:
                     logger.debug(f"[TrayService] {line}")
@@ -179,7 +185,8 @@ class TrayManager:
         event = message.get("event")
 
         if event == "ready":
-            self._ready = True
+            with self._state_lock:
+                self._ready = True
             logger.info("Tray service is ready")
 
         elif event == "pong":
@@ -214,7 +221,8 @@ class TrayManager:
         elif action == "select_profile" and self._on_profile_select:
             profile_id = message.get("profile_id")
             if profile_id:
-                self._current_profile_id = profile_id
+                with self._state_lock:
+                    self._current_profile_id = profile_id
                 GLib.idle_add(self._on_profile_select, profile_id)
             else:
                 logger.warning("select_profile action missing profile_id")
@@ -293,7 +301,8 @@ class TrayManager:
         Args:
             status: One of 'protected', 'warning', 'scanning', 'threat'
         """
-        self._current_status = status
+        with self._state_lock:
+            self._current_status = status
         self._send_command({"action": "update_status", "status": status})
 
     def update_scan_progress(self, percentage: int) -> None:
@@ -326,18 +335,21 @@ class TrayManager:
             profiles: List of profile dictionaries with 'id', 'name', 'is_default' keys
             current_profile_id: ID of the currently selected profile (optional)
         """
-        if current_profile_id is not None:
-            self._current_profile_id = current_profile_id
+        with self._state_lock:
+            if current_profile_id is not None:
+                self._current_profile_id = current_profile_id
+            profile_id_to_send = self._current_profile_id
         self._send_command({
             "action": "update_profiles",
             "profiles": profiles,
-            "current_profile_id": self._current_profile_id
+            "current_profile_id": profile_id_to_send
         })
         logger.debug(f"Updated tray profiles: {len(profiles)} profiles")
 
     def stop(self) -> None:
         """Stop the tray service subprocess."""
-        self._running = False
+        with self._state_lock:
+            self._running = False
 
         if self._process is not None:
             try:
@@ -361,7 +373,8 @@ class TrayManager:
             finally:
                 self._process = None
 
-        self._ready = False
+        with self._state_lock:
+            self._ready = False
         logger.info("Tray manager stopped")
 
     def cleanup(self) -> None:
@@ -383,7 +396,8 @@ class TrayManager:
     @property
     def is_active(self) -> bool:
         """Check if the tray service is running and ready."""
-        return self._running and self._ready and self._process is not None
+        with self._state_lock:
+            return self._running and self._ready and self._process is not None
 
     @property
     def is_library_available(self) -> bool:
@@ -393,12 +407,14 @@ class TrayManager:
         Always returns True for TrayManager since availability
         is determined by subprocess startup success.
         """
-        return self._running and self._process is not None
+        with self._state_lock:
+            return self._running and self._process is not None
 
     @property
     def current_status(self) -> str:
         """Get the current protection status."""
-        return self._current_status
+        with self._state_lock:
+            return self._current_status
 
 
 def is_available() -> bool:

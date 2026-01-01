@@ -8,6 +8,7 @@ import io
 import os
 import shutil
 import subprocess
+import threading
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
@@ -27,6 +28,7 @@ class ThreatSeverity(Enum):
 
 # Flatpak detection cache (None = not checked, True/False = result)
 _flatpak_detected: Optional[bool] = None
+_flatpak_lock = threading.Lock()
 
 
 def is_flatpak() -> bool:
@@ -37,16 +39,17 @@ def is_flatpak() -> bool:
     which is the standard way to detect Flatpak environment.
 
     The result is cached after the first check for performance.
+    Thread-safe via lock.
 
     Returns:
         True if running inside Flatpak sandbox, False otherwise
     """
     global _flatpak_detected
 
-    if _flatpak_detected is None:
-        _flatpak_detected = os.path.exists('/.flatpak-info')
-
-    return _flatpak_detected
+    with _flatpak_lock:
+        if _flatpak_detected is None:
+            _flatpak_detected = os.path.exists('/.flatpak-info')
+        return _flatpak_detected
 
 
 def wrap_host_command(command: List[str]) -> List[str]:

@@ -9,6 +9,7 @@ import os
 import shlex
 import shutil
 import subprocess
+import threading
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
@@ -89,62 +90,69 @@ class ScheduleConfig:
 # Detection caches (None = not checked)
 _systemd_available: Optional[bool] = None
 _cron_available: Optional[bool] = None
+_scheduler_cache_lock = threading.Lock()
 
 
 def _check_systemd_available() -> bool:
     """
     Check if systemd is available and usable for user-level timers.
 
+    Thread-safe via lock.
+
     Returns:
         True if systemd user timers are available, False otherwise
     """
     global _systemd_available
 
-    if _systemd_available is not None:
+    with _scheduler_cache_lock:
+        if _systemd_available is not None:
+            return _systemd_available
+
+        # Check if systemctl exists
+        systemctl_path = which_host_command("systemctl")
+        if systemctl_path is None:
+            _systemd_available = False
+            return False
+
+        # Verify systemd user session is running
+        try:
+            result = subprocess.run(
+                wrap_host_command(["systemctl", "--user", "status"]),
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+            # systemctl --user status returns 0 even if no units
+            # It returns non-zero if user session isn't available
+            _systemd_available = result.returncode == 0
+        except (subprocess.TimeoutExpired, FileNotFoundError, PermissionError):
+            _systemd_available = False
+        except Exception:
+            _systemd_available = False
+
         return _systemd_available
-
-    # Check if systemctl exists
-    systemctl_path = which_host_command("systemctl")
-    if systemctl_path is None:
-        _systemd_available = False
-        return False
-
-    # Verify systemd user session is running
-    try:
-        result = subprocess.run(
-            wrap_host_command(["systemctl", "--user", "status"]),
-            capture_output=True,
-            text=True,
-            timeout=5
-        )
-        # systemctl --user status returns 0 even if no units
-        # It returns non-zero if user session isn't available
-        _systemd_available = result.returncode == 0
-    except (subprocess.TimeoutExpired, FileNotFoundError, PermissionError):
-        _systemd_available = False
-    except Exception:
-        _systemd_available = False
-
-    return _systemd_available
 
 
 def _check_cron_available() -> bool:
     """
     Check if cron is available.
 
+    Thread-safe via lock.
+
     Returns:
         True if crontab command is available, False otherwise
     """
     global _cron_available
 
-    if _cron_available is not None:
+    with _scheduler_cache_lock:
+        if _cron_available is not None:
+            return _cron_available
+
+        # Check if crontab command exists
+        crontab_path = which_host_command("crontab")
+        _cron_available = crontab_path is not None
+
         return _cron_available
-
-    # Check if crontab command exists
-    crontab_path = which_host_command("crontab")
-    _cron_available = crontab_path is not None
-
-    return _cron_available
 
 
 class Scheduler:
