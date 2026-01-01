@@ -11,31 +11,14 @@ These tests verify the scanner's end-to-end behavior including:
 All tests mock ClamAV subprocess execution to run without requiring ClamAV installed.
 """
 
-import sys
 from pathlib import Path
 from unittest import mock
 
 import pytest
 
-# Store original gi modules to restore later (if they exist)
-_original_gi = sys.modules.get("gi")
-_original_gi_repository = sys.modules.get("gi.repository")
-
-# Mock gi module before importing src.core to avoid GTK dependencies in tests
-sys.modules["gi"] = mock.MagicMock()
-sys.modules["gi.repository"] = mock.MagicMock()
-
+# Import directly - scanner module uses GLib only for idle_add in async methods,
+# and those async methods are tested with proper subprocess mocking
 from src.core.scanner import Scanner, ScanResult, ScanStatus, ThreatDetail
-
-# Restore original gi modules after imports are done
-if _original_gi is not None:
-    sys.modules["gi"] = _original_gi
-else:
-    del sys.modules["gi"]
-if _original_gi_repository is not None:
-    sys.modules["gi.repository"] = _original_gi_repository
-else:
-    del sys.modules["gi.repository"]
 
 
 @pytest.mark.integration
@@ -278,25 +261,28 @@ Time: 0.200 sec (0 m 0 s)
 
         with mock.patch("src.core.scanner.get_clamav_path", return_value="/usr/bin/clamscan"):
             with mock.patch("src.core.scanner.wrap_host_command", side_effect=lambda x: x):
-                with mock.patch("src.core.scanner.check_clamav_installed", return_value=(True, "1.2.3")):
-                    with mock.patch("subprocess.Popen") as mock_popen:
-                        mock_process = mock.MagicMock()
-                        mock_process.communicate.return_value = ("", "")
-                        mock_process.returncode = 0
-                        mock_popen.return_value = mock_process
+                # Mock check_clamd_connection to force clamscan path (in "auto" mode,
+                # daemon is tried first if available)
+                with mock.patch("src.core.scanner.check_clamd_connection", return_value=(False, "not running")):
+                    with mock.patch("src.core.scanner.check_clamav_installed", return_value=(True, "1.2.3")):
+                        with mock.patch("subprocess.Popen") as mock_popen:
+                            mock_process = mock.MagicMock()
+                            mock_process.communicate.return_value = ("", "")
+                            mock_process.returncode = 0
+                            mock_popen.return_value = mock_process
 
-                        scanner.scan_sync(str(test_file))
+                            scanner.scan_sync(str(test_file))
 
-                        # Verify Popen was called
-                        mock_popen.assert_called_once()
+                            # Verify Popen was called
+                            mock_popen.assert_called_once()
 
-                        # Verify command arguments
-                        call_args = mock_popen.call_args
-                        cmd = call_args[0][0]
+                            # Verify command arguments
+                            call_args = mock_popen.call_args
+                            cmd = call_args[0][0]
 
-                        assert cmd[0] == "/usr/bin/clamscan"
-                        assert "-i" in cmd
-                        assert str(test_file) in cmd
+                            assert cmd[0] == "/usr/bin/clamscan"
+                            assert "-i" in cmd
+                            assert str(test_file) in cmd
 
     def test_scanner_sync_workflow_multiple_threats(self, tmp_path):
         """

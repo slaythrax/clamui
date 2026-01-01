@@ -46,16 +46,31 @@ def mock_log_entry():
     return entry
 
 
+def _clear_src_modules():
+    """Clear all cached src.* modules to prevent test pollution."""
+    modules_to_remove = [mod for mod in sys.modules.keys() if mod.startswith("src.")]
+    for mod in modules_to_remove:
+        del sys.modules[mod]
+
+
 @pytest.fixture
 def logs_view_class(mock_gi_modules):
     """Get LogsView class with mocked dependencies."""
     # Add additional mock modules that logs_view.py imports
     # Note: src.core.log_manager is NOT mocked - we need the real DaemonStatus enum
-    sys.modules['src.core.utils'] = mock.MagicMock()
-    sys.modules['src.ui.fullscreen_dialog'] = mock.MagicMock()
+    with mock.patch.dict(sys.modules, {
+        'src.core.utils': mock.MagicMock(),
+        'src.ui.fullscreen_dialog': mock.MagicMock(),
+    }):
+        # Clear any cached import of logs_view
+        if "src.ui.logs_view" in sys.modules:
+            del sys.modules["src.ui.logs_view"]
 
-    from src.ui.logs_view import LogsView
-    return LogsView
+        from src.ui.logs_view import LogsView
+        yield LogsView
+
+    # Critical: Clear all src.* modules after test to prevent pollution
+    _clear_src_modules()
 
 
 @pytest.fixture

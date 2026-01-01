@@ -40,6 +40,13 @@ def mock_clamav_config():
     return config
 
 
+def _clear_src_modules():
+    """Clear all cached src.* modules to prevent test pollution."""
+    modules_to_remove = [mod for mod in sys.modules.keys() if mod.startswith("src.")]
+    for mod in modules_to_remove:
+        del sys.modules[mod]
+
+
 @pytest.fixture
 def preferences_window_class(mock_gi_modules):
     """Get PreferencesWindow class with mocked dependencies."""
@@ -58,15 +65,15 @@ def preferences_window_class(mock_gi_modules):
         'src.core.scheduler': mock_scheduler,
         'src.core.scanner': mock_scanner,
     }):
+        # Clear any cached import
+        if "src.ui.preferences_window" in sys.modules:
+            del sys.modules["src.ui.preferences_window"]
+
         from src.ui.preferences_window import PreferencesWindow
-        # Keep the module in sys.modules after context exit
-        pw_module = sys.modules.get('src.ui.preferences_window')
+        yield PreferencesWindow
 
-    # Restore the module to sys.modules so patches can find it
-    if pw_module:
-        sys.modules['src.ui.preferences_window'] = pw_module
-
-    return PreferencesWindow
+    # Critical: Clear all src.* modules after test to prevent pollution
+    _clear_src_modules()
 
 
 @pytest.fixture

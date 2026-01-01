@@ -16,67 +16,76 @@ def _clear_src_modules():
 
 
 @pytest.fixture(autouse=True)
-def scanner_test_isolation():
-    """Ensure scanner tests have proper module isolation."""
+def ensure_fresh_scanner_import():
+    """Ensure scanner module is freshly imported for each test.
+
+    This fixture clears cached src modules and exposes fresh class references
+    as globals so tests can use Scanner, ScanResult, etc.
+    """
     global Scanner, ScanResult, ScanStatus, ThreatDetail, glob_to_regex, validate_pattern
 
-    # Clear any cached modules before test
+    # Clear any cached src modules before test
     _clear_src_modules()
 
-    # Set up GI mocks
-    mock_gi = MagicMock()
-    mock_gi_repository = MagicMock()
+    # Import fresh
+    from src.core.scanner import (
+        Scanner as _Scanner,
+        ScanResult as _ScanResult,
+        ScanStatus as _ScanStatus,
+        ThreatDetail as _ThreatDetail,
+        glob_to_regex as _glob_to_regex,
+        validate_pattern as _validate_pattern,
+    )
+    Scanner = _Scanner
+    ScanResult = _ScanResult
+    ScanStatus = _ScanStatus
+    ThreatDetail = _ThreatDetail
+    glob_to_regex = _glob_to_regex
+    validate_pattern = _validate_pattern
 
-    with patch.dict(sys.modules, {
-        'gi': mock_gi,
-        'gi.repository': mock_gi_repository,
-        'gi.repository.Gtk': MagicMock(),
-        'gi.repository.GLib': MagicMock(),
-    }):
-        # Import and expose the classes/functions for tests
-        from src.core.scanner import (
-            Scanner as _Scanner,
-            ScanResult as _ScanResult,
-            ScanStatus as _ScanStatus,
-            ThreatDetail as _ThreatDetail,
-            glob_to_regex as _glob_to_regex,
-            validate_pattern as _validate_pattern,
-        )
-        Scanner = _Scanner
-        ScanResult = _ScanResult
-        ScanStatus = _ScanStatus
-        ThreatDetail = _ThreatDetail
-        glob_to_regex = _glob_to_regex
-        validate_pattern = _validate_pattern
-
-        yield
+    yield
 
     # Clear after test
     _clear_src_modules()
 
 
+# Declare globals for type checkers
+Scanner = None
+ScanResult = None
+ScanStatus = None
+ThreatDetail = None
+glob_to_regex = None
+validate_pattern = None
+
+
 @pytest.fixture
 def scanner_class():
-    """Get Scanner class with proper mocking."""
+    """Get Scanner class."""
     return Scanner
 
 
 @pytest.fixture
 def scan_result_class():
-    """Get ScanResult class with proper mocking."""
+    """Get ScanResult class."""
     return ScanResult
 
 
 @pytest.fixture
 def scan_status_class():
-    """Get ScanStatus enum with proper mocking."""
+    """Get ScanStatus enum."""
     return ScanStatus
 
 
 @pytest.fixture
 def threat_detail_class():
-    """Get ThreatDetail class with proper mocking."""
+    """Get ThreatDetail class."""
     return ThreatDetail
+
+
+@pytest.fixture
+def scanner():
+    """Create a Scanner instance for testing."""
+    return Scanner()
 
 
 @pytest.fixture
@@ -1164,8 +1173,11 @@ class TestScannerErrorHandling:
         scanner = Scanner()
 
         with mock.patch("src.core.scanner.validate_path", return_value=(True, None)):
-            with mock.patch("src.core.scanner.check_clamav_installed", return_value=(False, "ClamAV not found")):
-                result = scanner.scan_sync(str(test_file))
+            # Also mock check_clamd_connection so it falls through to clamscan path
+            # (in "auto" mode, daemon is tried first if available)
+            with mock.patch("src.core.scanner.check_clamd_connection", return_value=(False, "not running")):
+                with mock.patch("src.core.scanner.check_clamav_installed", return_value=(False, "ClamAV not found")):
+                    result = scanner.scan_sync(str(test_file))
 
         assert result.status == ScanStatus.ERROR
         assert "not found" in result.error_message.lower() or "not installed" in result.stderr.lower()

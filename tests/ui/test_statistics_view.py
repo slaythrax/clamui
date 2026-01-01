@@ -20,6 +20,13 @@ from unittest import mock
 import pytest
 
 
+def _clear_src_modules():
+    """Clear all cached src.* modules to prevent test pollution."""
+    modules_to_remove = [mod for mod in sys.modules.keys() if mod.startswith("src.")]
+    for mod in modules_to_remove:
+        del sys.modules[mod]
+
+
 @pytest.fixture
 def statistics_view_class(mock_gi_modules):
     """Get StatisticsView class with mocked dependencies."""
@@ -30,14 +37,21 @@ def statistics_view_class(mock_gi_modules):
     mock_backend = mock.MagicMock()
     mock_backend.FigureCanvasGTK4Agg = mock_canvas
 
-    # Add matplotlib mocks to sys.modules directly
-    # Don't mock src.core.statistics_calculator - we need real enums
-    sys.modules['matplotlib'] = mock_matplotlib
-    sys.modules['matplotlib.figure'] = mock_figure
-    sys.modules['matplotlib.backends.backend_gtk4agg'] = mock_backend
+    # Use patch.dict to properly restore sys.modules after test
+    with mock.patch.dict(sys.modules, {
+        'matplotlib': mock_matplotlib,
+        'matplotlib.figure': mock_figure,
+        'matplotlib.backends.backend_gtk4agg': mock_backend,
+    }):
+        # Clear any cached import
+        if "src.ui.statistics_view" in sys.modules:
+            del sys.modules["src.ui.statistics_view"]
 
-    from src.ui.statistics_view import StatisticsView
-    return StatisticsView
+        from src.ui.statistics_view import StatisticsView
+        yield StatisticsView
+
+    # Critical: Clear all src.* modules after test to prevent pollution
+    _clear_src_modules()
 
 
 @pytest.fixture

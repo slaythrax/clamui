@@ -3,7 +3,6 @@
 
 import sys
 from unittest import mock
-from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -16,37 +15,33 @@ def _clear_src_modules():
 
 
 @pytest.fixture(autouse=True)
-def updater_test_isolation():
-    """Ensure updater tests have proper module isolation."""
+def ensure_fresh_updater_import():
+    """Ensure updater module is freshly imported for each test.
+
+    This fixture clears cached src modules and exposes fresh class references
+    as globals so tests can use FreshclamUpdater, UpdateResult, UpdateStatus.
+    """
     global FreshclamUpdater, UpdateResult, UpdateStatus
 
-    # Clear any cached modules before test
+    # Clear any cached src modules before test
     _clear_src_modules()
 
-    # Set up GI mocks
-    mock_gi = MagicMock()
-    mock_gi_repository = MagicMock()
+    # Import fresh
+    from src.core.updater import FreshclamUpdater as _FU, UpdateResult as _UR, UpdateStatus as _US
+    FreshclamUpdater = _FU
+    UpdateResult = _UR
+    UpdateStatus = _US
 
-    with patch.dict(sys.modules, {
-        'gi': mock_gi,
-        'gi.repository': mock_gi_repository,
-        'gi.repository.Gtk': MagicMock(),
-        'gi.repository.GLib': MagicMock(),
-    }):
-        # Import and expose the classes for tests
-        from src.core.updater import (
-            FreshclamUpdater as _FreshclamUpdater,
-            UpdateResult as _UpdateResult,
-            UpdateStatus as _UpdateStatus,
-        )
-        FreshclamUpdater = _FreshclamUpdater
-        UpdateResult = _UpdateResult
-        UpdateStatus = _UpdateStatus
-
-        yield
+    yield
 
     # Clear after test
     _clear_src_modules()
+
+
+# Declare globals for type checkers
+FreshclamUpdater = None
+UpdateResult = None
+UpdateStatus = None
 
 
 class TestUpdaterBuildCommand:

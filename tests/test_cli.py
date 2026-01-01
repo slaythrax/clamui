@@ -24,6 +24,13 @@ from unittest import mock
 import pytest
 
 
+def _clear_src_modules():
+    """Clear all cached src.* modules to prevent test pollution."""
+    modules_to_remove = [mod for mod in sys.modules.keys() if mod.startswith("src.")]
+    for mod in modules_to_remove:
+        del sys.modules[mod]
+
+
 @pytest.fixture
 def parse_file_arguments():
     """Import parse_file_arguments with proper GTK mocking.
@@ -82,6 +89,9 @@ def parse_file_arguments():
                 sys.modules[mod] = original
             elif mod in sys.modules:
                 del sys.modules[mod]
+
+        # Critical: Clear all src.* modules to prevent pollution
+        _clear_src_modules()
 
 
 class TestParseFileArguments:

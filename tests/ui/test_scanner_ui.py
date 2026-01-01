@@ -19,6 +19,13 @@ from unittest import mock
 import pytest
 
 
+def _clear_src_modules():
+    """Clear all cached src.* modules to prevent test pollution."""
+    modules_to_remove = [mod for mod in sys.modules.keys() if mod.startswith("src.")]
+    for mod in modules_to_remove:
+        del sys.modules[mod]
+
+
 @pytest.fixture
 def scan_view_class(mock_gi_modules):
     """
@@ -67,6 +74,10 @@ def scan_view_class(mock_gi_modules):
 
         from src.ui.scan_view import ScanView
         yield ScanView
+
+    # Critical: Clear all src.* modules after test to prevent pollution.
+    # The mocked modules may have been cached in src.core.scanner etc.
+    _clear_src_modules()
 
 
 @pytest.fixture

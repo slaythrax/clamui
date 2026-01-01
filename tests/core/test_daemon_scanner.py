@@ -7,60 +7,28 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-
-def _clear_src_modules():
-    """Clear all cached src.* modules to ensure clean imports."""
-    modules_to_remove = [mod for mod in list(sys.modules.keys()) if mod.startswith("src.")]
-    for mod in modules_to_remove:
-        del sys.modules[mod]
-
-
-@pytest.fixture(autouse=True)
-def daemon_scanner_test_isolation():
-    """Ensure daemon scanner tests have proper module isolation."""
-    global DaemonScanner, ScanResult, ScanStatus, ThreatDetail
-
-    # Clear any cached modules before test
-    _clear_src_modules()
-
-    # Set up GI mocks
-    mock_gi = MagicMock()
-    mock_gi_repository = MagicMock()
-
-    with patch.dict(sys.modules, {
-        'gi': mock_gi,
-        'gi.repository': mock_gi_repository,
-        'gi.repository.Gtk': MagicMock(),
-        'gi.repository.GLib': MagicMock(),
-    }):
-        # Import classes for tests
-        from src.core.daemon_scanner import DaemonScanner as _DaemonScanner
-        from src.core.scanner import (
-            ScanResult as _ScanResult,
-            ScanStatus as _ScanStatus,
-            ThreatDetail as _ThreatDetail,
-        )
-        DaemonScanner = _DaemonScanner
-        ScanResult = _ScanResult
-        ScanStatus = _ScanStatus
-        ThreatDetail = _ThreatDetail
-
-        yield
-
-    # Clear after test
-    _clear_src_modules()
+# Import directly - daemon_scanner uses GLib only for idle_add in async methods,
+# and those methods are not tested here (unit tests mock the async behavior)
+from src.core.daemon_scanner import DaemonScanner
+from src.core.scanner import ScanResult, ScanStatus, ThreatDetail
 
 
 @pytest.fixture
 def daemon_scanner_class():
-    """Get DaemonScanner class with proper mocking."""
+    """Get DaemonScanner class."""
     return DaemonScanner
 
 
 @pytest.fixture
 def scan_status_class():
-    """Get ScanStatus enum with proper mocking."""
+    """Get ScanStatus enum."""
     return ScanStatus
+
+
+@pytest.fixture
+def daemon_scanner():
+    """Create a DaemonScanner instance for testing."""
+    return DaemonScanner()
 
 
 class TestDaemonScannerCheckAvailable:

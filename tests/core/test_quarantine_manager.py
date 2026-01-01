@@ -2,7 +2,6 @@
 """Unit tests for the QuarantineManager class."""
 
 import os
-import sys
 import tempfile
 import threading
 from pathlib import Path
@@ -10,13 +9,8 @@ from unittest import mock
 
 import pytest
 
-# Mock gi module before importing src.core to avoid GTK dependencies in tests
-_original_gi = sys.modules.get("gi")
-_original_gi_repository = sys.modules.get("gi.repository")
-
-sys.modules["gi"] = mock.MagicMock()
-sys.modules["gi.repository"] = mock.MagicMock()
-
+# Import directly - quarantine modules use GLib only for async callbacks,
+# which are mocked in tests via GLib.idle_add patching
 from src.core.quarantine.database import QuarantineDatabase, QuarantineEntry
 from src.core.quarantine.file_handler import (
     FileOperationResult,
@@ -28,16 +22,6 @@ from src.core.quarantine.manager import (
     QuarantineResult,
     QuarantineStatus,
 )
-
-# Restore original gi modules after imports are done
-if _original_gi is not None:
-    sys.modules["gi"] = _original_gi
-else:
-    del sys.modules["gi"]
-if _original_gi_repository is not None:
-    sys.modules["gi.repository"] = _original_gi_repository
-else:
-    del sys.modules["gi.repository"]
 
 
 class TestQuarantineStatus:

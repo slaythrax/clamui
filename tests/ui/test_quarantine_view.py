@@ -45,14 +45,28 @@ def mock_quarantine_entry():
     return entry
 
 
+def _clear_src_modules():
+    """Clear all cached src.* modules to prevent test pollution."""
+    modules_to_remove = [mod for mod in sys.modules.keys() if mod.startswith("src.")]
+    for mod in modules_to_remove:
+        del sys.modules[mod]
+
+
 @pytest.fixture
 def quarantine_view_class(mock_gi_modules):
     """Get QuarantineView class with mocked dependencies."""
     with mock.patch.dict(sys.modules, {
         'src.core.quarantine': mock.MagicMock(),
     }):
+        # Clear any cached import
+        if "src.ui.quarantine_view" in sys.modules:
+            del sys.modules["src.ui.quarantine_view"]
+
         from src.ui.quarantine_view import QuarantineView
-        return QuarantineView
+        yield QuarantineView
+
+    # Critical: Clear all src.* modules after test to prevent pollution
+    _clear_src_modules()
 
 
 @pytest.fixture
