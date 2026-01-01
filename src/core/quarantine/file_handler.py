@@ -110,9 +110,15 @@ class SecureFileHandler:
         """
         try:
             # Create directory with parents if it doesn't exist
-            self._quarantine_dir.mkdir(parents=True, exist_ok=True)
+            # Use mode= parameter to set permissions atomically, avoiding TOCTOU race
+            # Note: mode is modified by umask, so we also call chmod after
+            self._quarantine_dir.mkdir(
+                parents=True,
+                exist_ok=True,
+                mode=self.QUARANTINE_DIR_PERMISSIONS
+            )
 
-            # Set restrictive permissions on the directory
+            # Ensure restrictive permissions even if umask modified them
             os.chmod(self._quarantine_dir, self.QUARANTINE_DIR_PERMISSIONS)
 
             return (True, None)

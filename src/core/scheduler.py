@@ -6,6 +6,7 @@ scheduling that runs even when the GUI application is closed.
 """
 
 import os
+import shlex
 import shutil
 import subprocess
 from dataclasses import dataclass
@@ -14,6 +15,30 @@ from pathlib import Path
 from typing import List, Optional, Tuple
 
 from .utils import is_flatpak, wrap_host_command, which_host_command
+
+
+def _validate_target_paths(targets: List[str]) -> Optional[str]:
+    """
+    Validate target paths for security issues.
+
+    Checks for:
+    - Newlines (could inject additional cron/systemd entries)
+    - Other control characters that could cause injection
+
+    Args:
+        targets: List of target paths to validate
+
+    Returns:
+        Error message if validation fails, None if all paths are valid
+    """
+    for target in targets:
+        # Check for newlines (crontab injection)
+        if '\n' in target or '\r' in target:
+            return f"Invalid path contains newline characters: {target}"
+        # Check for null bytes (path truncation attacks)
+        if '\x00' in target:
+            return f"Invalid path contains null bytes: {target}"
+    return None
 
 
 class SchedulerBackend(Enum):
@@ -470,6 +495,11 @@ class Scheduler:
             return (False, "No scheduler backend available. "
                           "Install systemd or cron to enable scheduled scans.")
 
+        # Validate target paths for security issues (newlines, null bytes)
+        validation_error = _validate_target_paths(targets)
+        if validation_error:
+            return (False, validation_error)
+
         # Convert frequency string to enum
         try:
             freq = ScheduleFrequency(frequency.lower())
@@ -577,13 +607,14 @@ class Scheduler:
             Service file content as string
         """
         # Build command with options
+        # Use shlex.quote() to prevent command injection via malicious paths
         exec_cmd = cli_path
         if skip_on_battery:
             exec_cmd += " --skip-on-battery"
         if auto_quarantine:
             exec_cmd += " --auto-quarantine"
         for target in targets:
-            exec_cmd += f" --target \"{target}\""
+            exec_cmd += f" --target {shlex.quote(target)}"
 
         return f"""[Unit]
 Description=ClamUI Scheduled Antivirus Scan
@@ -649,13 +680,14 @@ WantedBy=timers.target
             )
 
             # Build command
+            # Use shlex.quote() to prevent command injection via malicious paths
             cron_cmd = cli_path
             if skip_on_battery:
                 cron_cmd += " --skip-on-battery"
             if auto_quarantine:
                 cron_cmd += " --auto-quarantine"
             for target in targets:
-                cron_cmd += f" --target \"{target}\""
+                cron_cmd += f" --target {shlex.quote(target)}"
 
             # Create cron entry
             cron_entry = f"{cron_time} {cron_cmd}"

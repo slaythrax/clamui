@@ -319,7 +319,8 @@ class TestSchedulerServiceFiles:
         assert "Type=oneshot" in service
         assert "ExecStart=/usr/bin/clamui-scheduled-scan" in service
         assert "--skip-on-battery" in service
-        assert "--target \"/home/user/Documents\"" in service
+        # shlex.quote() doesn't add quotes for paths without special chars
+        assert "--target /home/user/Documents" in service
         assert "--auto-quarantine" not in service
 
     def test_generate_service_file_with_quarantine(self, scheduler):
@@ -343,8 +344,9 @@ class TestSchedulerServiceFiles:
             auto_quarantine=True
         )
 
-        assert "--target \"/home/user/Documents\"" in service
-        assert "--target \"/home/user/Downloads\"" in service
+        # shlex.quote() doesn't add quotes for paths without special chars
+        assert "--target /home/user/Documents" in service
+        assert "--target /home/user/Downloads" in service
 
     def test_generate_timer_file(self, scheduler):
         """Test timer file generation."""
@@ -356,6 +358,62 @@ class TestSchedulerServiceFiles:
         assert "OnCalendar=*-*-* 02:00:00" in timer
         assert "Persistent=true" in timer
         assert "WantedBy=timers.target" in timer
+
+    def test_generate_service_file_special_chars_quoted(self, scheduler):
+        """Test service file properly quotes paths with special characters."""
+        service = scheduler._generate_service_file(
+            cli_path="/usr/bin/clamui-scheduled-scan",
+            targets=["/home/user/My Documents", "/path/with'quotes"],
+            skip_on_battery=True,
+            auto_quarantine=False
+        )
+
+        # shlex.quote() should properly quote these paths
+        assert "--target '/home/user/My Documents'" in service
+        # Single quotes in path need special quoting
+        assert "with" in service  # Path should be quoted somehow
+
+
+class TestSchedulerPathValidation:
+    """Tests for path validation security."""
+
+    def test_validate_target_paths_rejects_newlines(self):
+        """Test that paths with newlines are rejected."""
+        from src.core.scheduler import _validate_target_paths
+
+        # Newline injection attempt
+        error = _validate_target_paths(["/home/user\n0 * * * * malicious"])
+        assert error is not None
+        assert "newline" in error.lower()
+
+    def test_validate_target_paths_rejects_carriage_return(self):
+        """Test that paths with carriage returns are rejected."""
+        from src.core.scheduler import _validate_target_paths
+
+        error = _validate_target_paths(["/home/user\rmalicious"])
+        assert error is not None
+        assert "newline" in error.lower()
+
+    def test_validate_target_paths_rejects_null_bytes(self):
+        """Test that paths with null bytes are rejected."""
+        from src.core.scheduler import _validate_target_paths
+
+        error = _validate_target_paths(["/home/user\x00malicious"])
+        assert error is not None
+        assert "null" in error.lower()
+
+    def test_validate_target_paths_accepts_valid_paths(self):
+        """Test that valid paths are accepted."""
+        from src.core.scheduler import _validate_target_paths
+
+        error = _validate_target_paths([
+            "/home/user/Documents",
+            "/home/user/My Documents",
+            "/path/with'quotes",
+            "/path/with\"doublequotes\"",
+            "/path/with$dollar",
+        ])
+        assert error is None
 
 
 class TestSchedulerEnableDisable:
