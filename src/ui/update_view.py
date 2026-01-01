@@ -10,6 +10,7 @@ from gi.repository import Gtk, Adw, GLib
 
 from ..core.updater import FreshclamUpdater, UpdateResult, UpdateStatus
 from ..core.utils import check_freshclam_installed
+from .utils import add_row_icon
 
 
 class UpdateView(Gtk.Box):
@@ -77,7 +78,7 @@ class UpdateView(Gtk.Box):
         info_row = Adw.ActionRow()
         info_row.set_title("Virus Definitions")
         info_row.set_subtitle("Click 'Update Database' to download the latest virus signatures")
-        info_row.set_icon_name("software-update-available-symbolic")
+        add_row_icon(info_row, "software-update-available-symbolic")
 
         info_group.add(info_row)
         self.append(info_group)

@@ -366,7 +366,7 @@ class TestLogsViewLogRowCreation:
     """Tests for log row creation."""
 
     def test_create_log_row_sets_scan_icon(self, logs_view_class, mock_log_entry, mock_gi_modules):
-        """Test that scan logs get folder icon."""
+        """Test that scan logs get folder icon via add_prefix."""
         view = object.__new__(logs_view_class)
         mock_log_entry.type = "scan"
 
@@ -376,10 +376,11 @@ class TestLogsViewLogRowCreation:
 
         row = view._create_log_row(mock_log_entry)
 
-        mock_row.set_icon_name.assert_called_with("folder-symbolic")
+        # Icon is added via add_prefix with a Gtk.Image (modern pattern)
+        mock_row.add_prefix.assert_called()
 
     def test_create_log_row_sets_update_icon(self, logs_view_class, mock_log_entry, mock_gi_modules):
-        """Test that update logs get update icon."""
+        """Test that update logs get update icon via add_prefix."""
         view = object.__new__(logs_view_class)
         mock_log_entry.type = "update"
 
@@ -388,7 +389,8 @@ class TestLogsViewLogRowCreation:
 
         row = view._create_log_row(mock_log_entry)
 
-        mock_row.set_icon_name.assert_called_with("software-update-available-symbolic")
+        # Icon is added via add_prefix with a Gtk.Image (modern pattern)
+        mock_row.add_prefix.assert_called()
 
     def test_create_log_row_sets_name_to_id(self, logs_view_class, mock_log_entry, mock_gi_modules):
         """Test that row name is set to entry ID."""
@@ -414,13 +416,14 @@ class TestLogsViewDaemonStatus:
         view._log_manager = mock_log_manager
         view._log_manager.get_daemon_status.return_value = (DaemonStatus.RUNNING, "Running")
         view._daemon_status_row = mock.MagicMock()
+        view._daemon_status_icon = mock.MagicMock()
         view._live_toggle = mock.MagicMock()
 
         result = view._check_daemon_status()
 
         assert result is False
         view._daemon_status_row.set_subtitle.assert_called_with("Running")
-        view._daemon_status_row.set_icon_name.assert_called_with("emblem-ok-symbolic")
+        view._daemon_status_icon.set_from_icon_name.assert_called_with("emblem-ok-symbolic")
         view._live_toggle.set_sensitive.assert_called_with(True)
 
     def test_check_daemon_status_stopped(self, logs_view_class, mock_log_manager):
@@ -431,12 +434,13 @@ class TestLogsViewDaemonStatus:
         view._log_manager = mock_log_manager
         view._log_manager.get_daemon_status.return_value = (DaemonStatus.STOPPED, "Stopped")
         view._daemon_status_row = mock.MagicMock()
+        view._daemon_status_icon = mock.MagicMock()
         view._live_toggle = mock.MagicMock()
 
         view._check_daemon_status()
 
         view._daemon_status_row.set_subtitle.assert_called_with("Stopped")
-        view._daemon_status_row.set_icon_name.assert_called_with("media-playback-stop-symbolic")
+        view._daemon_status_icon.set_from_icon_name.assert_called_with("media-playback-stop-symbolic")
         view._live_toggle.set_sensitive.assert_called_with(True)
 
     def test_check_daemon_status_not_installed(self, logs_view_class, mock_log_manager):

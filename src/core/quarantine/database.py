@@ -7,10 +7,11 @@ Stores information about quarantined files including original path, threat info,
 import os
 import sqlite3
 import threading
+from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Optional
+from typing import Generator, Optional
 
 
 @dataclass
@@ -90,18 +91,25 @@ class QuarantineDatabase:
             # Handle silently - will fail on database operations
             pass
 
-    def _get_connection(self) -> sqlite3.Connection:
+    @contextmanager
+    def _get_connection(self) -> Generator[sqlite3.Connection, None, None]:
         """
-        Get a new database connection with WAL mode enabled.
+        Get a database connection as a context manager with WAL mode enabled.
 
-        Returns:
+        The connection is properly closed after use, preventing resource warnings.
+        Transactions are automatically committed on success or rolled back on error.
+
+        Yields:
             SQLite connection object
         """
         conn = sqlite3.connect(str(self._db_path), timeout=30.0)
-        # Enable WAL mode for better concurrency and corruption prevention
-        conn.execute("PRAGMA journal_mode=WAL")
-        conn.execute("PRAGMA foreign_keys=ON")
-        return conn
+        try:
+            # Enable WAL mode for better concurrency and corruption prevention
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute("PRAGMA foreign_keys=ON")
+            yield conn
+        finally:
+            conn.close()
 
     def _init_database(self) -> None:
         """Initialize the database schema if it doesn't exist."""

@@ -540,13 +540,14 @@ class TestStatisticsViewUpdateProtectionDisplay:
         view = object.__new__(statistics_view_class)
         view._current_protection = None
         view._protection_row = mock.MagicMock()
+        view._protection_row_icon = mock.MagicMock()
         view._status_badge = mock.MagicMock()
         view._last_scan_row = mock.MagicMock()
 
         view._update_protection_display()
 
         view._protection_row.set_subtitle.assert_called_with("Unable to determine status")
-        view._protection_row.set_icon_name.assert_called_with("dialog-question-symbolic")
+        view._protection_row_icon.set_from_icon_name.assert_called_with("dialog-question-symbolic")
         view._status_badge.set_label.assert_called_with("Unknown")
 
     def test_update_protection_display_protected(self, statistics_view_class):
@@ -564,6 +565,7 @@ class TestStatisticsViewUpdateProtectionDisplay:
             view = object.__new__(statistics_view_class)
             view._current_protection = mock_status
             view._protection_row = mock.MagicMock()
+            view._protection_row_icon = mock.MagicMock()
             view._status_badge = mock.MagicMock()
             view._last_scan_row = mock.MagicMock()
 
@@ -572,7 +574,7 @@ class TestStatisticsViewUpdateProtectionDisplay:
             view._update_protection_display()
 
             view._protection_row.set_subtitle.assert_called_with("System is protected")
-            view._protection_row.set_icon_name.assert_called_with("emblem-ok-symbolic")
+            view._protection_row_icon.set_from_icon_name.assert_called_with("emblem-ok-symbolic")
             view._status_badge.set_label.assert_called_with("Protected")
             view._status_badge.add_css_class.assert_called_with("success")
 
@@ -590,12 +592,13 @@ class TestStatisticsViewUpdateProtectionDisplay:
             view = object.__new__(statistics_view_class)
             view._current_protection = mock_status
             view._protection_row = mock.MagicMock()
+            view._protection_row_icon = mock.MagicMock()
             view._status_badge = mock.MagicMock()
             view._last_scan_row = mock.MagicMock()
 
             view._update_protection_display()
 
-            view._protection_row.set_icon_name.assert_called_with("dialog-warning-symbolic")
+            view._protection_row_icon.set_from_icon_name.assert_called_with("dialog-warning-symbolic")
             view._status_badge.set_label.assert_called_with("At Risk")
             view._status_badge.add_css_class.assert_called_with("warning")
 
@@ -613,12 +616,13 @@ class TestStatisticsViewUpdateProtectionDisplay:
             view = object.__new__(statistics_view_class)
             view._current_protection = mock_status
             view._protection_row = mock.MagicMock()
+            view._protection_row_icon = mock.MagicMock()
             view._status_badge = mock.MagicMock()
             view._last_scan_row = mock.MagicMock()
 
             view._update_protection_display()
 
-            view._protection_row.set_icon_name.assert_called_with("dialog-error-symbolic")
+            view._protection_row_icon.set_from_icon_name.assert_called_with("dialog-error-symbolic")
             view._status_badge.set_label.assert_called_with("Unprotected")
             view._status_badge.add_css_class.assert_called_with("error")
 

@@ -67,10 +67,13 @@ class TestQuarantineWorkflow:
     @pytest.fixture
     def manager(self, temp_environment):
         """Create a QuarantineManager for testing."""
-        return QuarantineManager(
+        mgr = QuarantineManager(
             quarantine_directory=str(temp_environment["quarantine_dir"]),
             database_path=str(temp_environment["db_path"]),
         )
+        yield mgr
+        # Explicitly close the database to prevent resource warnings
+        mgr._database.close()
 
     def create_test_file(self, source_dir: Path, name: str = "test_threat.exe", content: bytes = b"malware content"):
         """Helper to create a test file for quarantine testing."""
@@ -189,10 +192,13 @@ class TestRestoreWorkflow:
     @pytest.fixture
     def manager(self, temp_environment):
         """Create a QuarantineManager for testing."""
-        return QuarantineManager(
+        mgr = QuarantineManager(
             quarantine_directory=str(temp_environment["quarantine_dir"]),
             database_path=str(temp_environment["db_path"]),
         )
+        yield mgr
+        # Explicitly close the database to prevent resource warnings
+        mgr._database.close()
 
     def create_and_quarantine_file(self, temp_environment, manager, name: str = "test.exe"):
         """Helper to create and quarantine a test file."""
@@ -299,10 +305,13 @@ class TestDeleteWorkflow:
     @pytest.fixture
     def manager(self, temp_environment):
         """Create a QuarantineManager for testing."""
-        return QuarantineManager(
+        mgr = QuarantineManager(
             quarantine_directory=str(temp_environment["quarantine_dir"]),
             database_path=str(temp_environment["db_path"]),
         )
+        yield mgr
+        # Explicitly close the database to prevent resource warnings
+        mgr._database.close()
 
     def create_and_quarantine_file(self, temp_environment, manager, name: str = "test.exe", size: int = 1000):
         """Helper to create and quarantine a test file."""
@@ -399,10 +408,13 @@ class TestCleanupOldItemsWorkflow:
     @pytest.fixture
     def manager(self, temp_environment):
         """Create a QuarantineManager for testing."""
-        return QuarantineManager(
+        mgr = QuarantineManager(
             quarantine_directory=str(temp_environment["quarantine_dir"]),
             database_path=str(temp_environment["db_path"]),
         )
+        yield mgr
+        # Explicitly close the database to prevent resource warnings
+        mgr._database.close()
 
     def create_and_quarantine_file(self, temp_environment, manager, name: str = "test.exe"):
         """Helper to create and quarantine a test file."""
@@ -428,7 +440,8 @@ class TestCleanupOldItemsWorkflow:
         db_path = str(temp_environment["db_path"])
         old_date = (datetime.now() - timedelta(days=45)).isoformat()
 
-        with sqlite3.connect(db_path) as conn:
+        conn = sqlite3.connect(db_path)
+        try:
             conn.execute(
                 "UPDATE quarantine SET detection_date = ? WHERE id = ?",
                 (old_date, entry2.id)
@@ -438,6 +451,8 @@ class TestCleanupOldItemsWorkflow:
                 (old_date, entry3.id)
             )
             conn.commit()
+        finally:
+            conn.close()
 
         # Get old entries
         old_entries = manager.get_old_entries(days=30)
@@ -547,10 +562,13 @@ class TestQuarantineInfoIntegration:
     @pytest.fixture
     def manager(self, temp_environment):
         """Create a QuarantineManager for testing."""
-        return QuarantineManager(
+        mgr = QuarantineManager(
             quarantine_directory=str(temp_environment["quarantine_dir"]),
             database_path=str(temp_environment["db_path"]),
         )
+        yield mgr
+        # Explicitly close the database to prevent resource warnings
+        mgr._database.close()
 
     def test_get_quarantine_info_integration(self, temp_environment, manager):
         """Test get_quarantine_info returns correct comprehensive data."""
@@ -618,10 +636,13 @@ class TestEdgeCases:
     @pytest.fixture
     def manager(self, temp_environment):
         """Create a QuarantineManager for testing."""
-        return QuarantineManager(
+        mgr = QuarantineManager(
             quarantine_directory=str(temp_environment["quarantine_dir"]),
             database_path=str(temp_environment["db_path"]),
         )
+        yield mgr
+        # Explicitly close the database to prevent resource warnings
+        mgr._database.close()
 
     def test_empty_file_quarantine(self, temp_environment, manager):
         """Test quarantining an empty file."""
@@ -721,74 +742,80 @@ class TestDatabaseAndFileHandlerIntegration:
         db = QuarantineDatabase(str(temp_environment["db_path"]))
         fh = SecureFileHandler(str(temp_environment["quarantine_dir"]))
 
-        # Create test file
-        test_file = temp_environment["source_dir"] / "test.exe"
-        test_file.write_bytes(b"test content")
+        try:
+            # Create test file
+            test_file = temp_environment["source_dir"] / "test.exe"
+            test_file.write_bytes(b"test content")
 
-        # Move file using file handler
-        result = fh.move_to_quarantine(str(test_file), "TestThreat")
-        assert result.is_success
+            # Move file using file handler
+            result = fh.move_to_quarantine(str(test_file), "TestThreat")
+            assert result.is_success
 
-        # Add entry to database
-        entry_id = db.add_entry(
-            original_path=str(test_file),
-            quarantine_path=result.destination_path,
-            threat_name="TestThreat",
-            file_size=result.file_size,
-            file_hash=result.file_hash,
-        )
-        assert entry_id is not None
+            # Add entry to database
+            entry_id = db.add_entry(
+                original_path=str(test_file),
+                quarantine_path=result.destination_path,
+                threat_name="TestThreat",
+                file_size=result.file_size,
+                file_hash=result.file_hash,
+            )
+            assert entry_id is not None
 
-        # Verify consistency
-        entry = db.get_entry(entry_id)
-        assert entry is not None
-        assert Path(entry.quarantine_path).exists()
-        assert entry.file_size == result.file_size
-        assert entry.file_hash == result.file_hash
+            # Verify consistency
+            entry = db.get_entry(entry_id)
+            assert entry is not None
+            assert Path(entry.quarantine_path).exists()
+            assert entry.file_size == result.file_size
+            assert entry.file_hash == result.file_hash
+        finally:
+            db.close()
 
     def test_hash_verification_integration(self, temp_environment):
         """Test hash verification works correctly with file handler and database."""
         db = QuarantineDatabase(str(temp_environment["db_path"]))
         fh = SecureFileHandler(str(temp_environment["quarantine_dir"]))
 
-        # Create test file
-        test_file = temp_environment["source_dir"] / "test.exe"
-        original_content = b"original content for hashing"
-        test_file.write_bytes(original_content)
+        try:
+            # Create test file
+            test_file = temp_environment["source_dir"] / "test.exe"
+            original_content = b"original content for hashing"
+            test_file.write_bytes(original_content)
 
-        # Quarantine file
-        result = fh.move_to_quarantine(str(test_file), "TestThreat")
-        assert result.is_success
+            # Quarantine file
+            result = fh.move_to_quarantine(str(test_file), "TestThreat")
+            assert result.is_success
 
-        # Store in database
-        entry_id = db.add_entry(
-            original_path=str(test_file),
-            quarantine_path=result.destination_path,
-            threat_name="TestThreat",
-            file_size=result.file_size,
-            file_hash=result.file_hash,
-        )
+            # Store in database
+            entry_id = db.add_entry(
+                original_path=str(test_file),
+                quarantine_path=result.destination_path,
+                threat_name="TestThreat",
+                file_size=result.file_size,
+                file_hash=result.file_hash,
+            )
 
-        entry = db.get_entry(entry_id)
+            entry = db.get_entry(entry_id)
 
-        # Verify integrity
-        is_valid, error = fh.verify_file_integrity(
-            entry.quarantine_path,
-            entry.file_hash
-        )
-        assert is_valid is True
-        assert error is None
+            # Verify integrity
+            is_valid, error = fh.verify_file_integrity(
+                entry.quarantine_path,
+                entry.file_hash
+            )
+            assert is_valid is True
+            assert error is None
 
-        # Now tamper with file and verify detection
-        quarantine_path = Path(entry.quarantine_path)
-        os.chmod(quarantine_path, stat.S_IRUSR | stat.S_IWUSR)
-        quarantine_path.write_bytes(b"tampered content")
-        os.chmod(quarantine_path, 0o400)
+            # Now tamper with file and verify detection
+            quarantine_path = Path(entry.quarantine_path)
+            os.chmod(quarantine_path, stat.S_IRUSR | stat.S_IWUSR)
+            quarantine_path.write_bytes(b"tampered content")
+            os.chmod(quarantine_path, 0o400)
 
-        # Verify should now fail
-        is_valid, error = fh.verify_file_integrity(
-            entry.quarantine_path,
-            entry.file_hash
-        )
-        assert is_valid is False
-        assert "mismatch" in error.lower()
+            # Verify should now fail
+            is_valid, error = fh.verify_file_integrity(
+                entry.quarantine_path,
+                entry.file_hash
+            )
+            assert is_valid is False
+            assert "mismatch" in error.lower()
+        finally:
+            db.close()

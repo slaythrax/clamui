@@ -23,6 +23,7 @@ from ..core.quarantine import (
     QuarantineResult,
     QuarantineStatus,
 )
+from .utils import add_row_icon
 
 # Pagination thresholds for quarantine list
 INITIAL_DISPLAY_LIMIT = 25
@@ -126,7 +127,7 @@ class QuarantineView(Gtk.Box):
         self._storage_row = Adw.ActionRow()
         self._storage_row.set_title("Total Size")
         self._storage_row.set_subtitle("Calculating...")
-        self._storage_row.set_icon_name("drive-harddisk-symbolic")
+        add_row_icon(self._storage_row, "drive-harddisk-symbolic")
 
         # Count indicator
         self._count_label = Gtk.Label()
@@ -437,7 +438,7 @@ class QuarantineView(Gtk.Box):
         row.set_subtitle(display_path)
 
         # Set icon
-        row.set_icon_name("dialog-warning-symbolic")
+        add_row_icon(row, "dialog-warning-symbolic")
 
         # Create info label with date and size
         try:
@@ -470,21 +471,21 @@ class QuarantineView(Gtk.Box):
         path_row.set_title("Original Path")
         path_row.set_subtitle(entry.original_path)
         path_row.set_subtitle_selectable(True)
-        path_row.set_icon_name("folder-symbolic")
+        add_row_icon(path_row, "folder-symbolic")
         details_box.append(path_row)
 
         # Detection date row
         date_row = Adw.ActionRow()
         date_row.set_title("Detection Date")
         date_row.set_subtitle(date_str)
-        date_row.set_icon_name("x-office-calendar-symbolic")
+        add_row_icon(date_row, "x-office-calendar-symbolic")
         details_box.append(date_row)
 
         # File size row
         size_row = Adw.ActionRow()
         size_row.set_title("File Size")
         size_row.set_subtitle(f"{size_str} ({entry.file_size:,} bytes)")
-        size_row.set_icon_name("drive-harddisk-symbolic")
+        add_row_icon(size_row, "drive-harddisk-symbolic")
         details_box.append(size_row)
 
         content_box.append(details_box)

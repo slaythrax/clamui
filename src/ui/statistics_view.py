@@ -23,6 +23,7 @@ from ..core.statistics_calculator import (
     Timeframe,
     ProtectionLevel,
 )
+from .utils import add_row_icon
 
 
 class StatisticsView(Gtk.Box):
@@ -141,7 +142,7 @@ class StatisticsView(Gtk.Box):
         self._protection_row = Adw.ActionRow()
         self._protection_row.set_title("System Status")
         self._protection_row.set_subtitle("Checking...")
-        self._protection_row.set_icon_name("dialog-question-symbolic")
+        self._protection_row_icon = add_row_icon(self._protection_row, "dialog-question-symbolic")
 
         # Status badge
         self._status_badge = Gtk.Label()
@@ -156,7 +157,7 @@ class StatisticsView(Gtk.Box):
         self._last_scan_row = Adw.ActionRow()
         self._last_scan_row.set_title("Last Scan")
         self._last_scan_row.set_subtitle("No scans recorded")
-        self._last_scan_row.set_icon_name("document-open-recent-symbolic")
+        add_row_icon(self._last_scan_row, "document-open-recent-symbolic")
 
         status_group.add(self._last_scan_row)
 
@@ -222,7 +223,7 @@ class StatisticsView(Gtk.Box):
         self._total_scans_row = Adw.ActionRow()
         self._total_scans_row.set_title("Total Scans")
         self._total_scans_row.set_subtitle("Number of scans performed")
-        self._total_scans_row.set_icon_name("folder-saved-search-symbolic")
+        add_row_icon(self._total_scans_row, "folder-saved-search-symbolic")
 
         self._total_scans_label = Gtk.Label()
         self._total_scans_label.set_label("0")
@@ -236,7 +237,7 @@ class StatisticsView(Gtk.Box):
         self._files_scanned_row = Adw.ActionRow()
         self._files_scanned_row.set_title("Files Scanned")
         self._files_scanned_row.set_subtitle("Total files checked")
-        self._files_scanned_row.set_icon_name("document-open-symbolic")
+        add_row_icon(self._files_scanned_row, "document-open-symbolic")
 
         self._files_scanned_label = Gtk.Label()
         self._files_scanned_label.set_label("0")
@@ -250,7 +251,7 @@ class StatisticsView(Gtk.Box):
         self._threats_row = Adw.ActionRow()
         self._threats_row.set_title("Threats Detected")
         self._threats_row.set_subtitle("Malware and suspicious files found")
-        self._threats_row.set_icon_name("dialog-warning-symbolic")
+        add_row_icon(self._threats_row, "dialog-warning-symbolic")
 
         self._threats_label = Gtk.Label()
         self._threats_label.set_label("0")
@@ -264,7 +265,7 @@ class StatisticsView(Gtk.Box):
         self._clean_scans_row = Adw.ActionRow()
         self._clean_scans_row.set_title("Clean Scans")
         self._clean_scans_row.set_subtitle("Scans with no threats found")
-        self._clean_scans_row.set_icon_name("emblem-ok-symbolic")
+        add_row_icon(self._clean_scans_row, "emblem-ok-symbolic")
 
         self._clean_scans_label = Gtk.Label()
         self._clean_scans_label.set_label("0")
@@ -278,7 +279,7 @@ class StatisticsView(Gtk.Box):
         self._duration_row = Adw.ActionRow()
         self._duration_row.set_title("Average Scan Duration")
         self._duration_row.set_subtitle("Mean time per scan")
-        self._duration_row.set_icon_name("preferences-system-time-symbolic")
+        add_row_icon(self._duration_row, "preferences-system-time-symbolic")
 
         self._duration_label = Gtk.Label()
         self._duration_label.set_label("--")
@@ -557,7 +558,7 @@ class StatisticsView(Gtk.Box):
         quick_scan_row = Adw.ActionRow()
         quick_scan_row.set_title("Quick Scan")
         quick_scan_row.set_subtitle("Scan your home directory")
-        quick_scan_row.set_icon_name("media-playback-start-symbolic")
+        add_row_icon(quick_scan_row, "media-playback-start-symbolic")
         quick_scan_row.set_activatable(True)
         quick_scan_row.connect("activated", self._on_quick_scan_clicked)
 
@@ -572,7 +573,7 @@ class StatisticsView(Gtk.Box):
         view_logs_row = Adw.ActionRow()
         view_logs_row.set_title("View Scan Logs")
         view_logs_row.set_subtitle("See detailed scan history")
-        view_logs_row.set_icon_name("document-open-recent-symbolic")
+        add_row_icon(view_logs_row, "document-open-recent-symbolic")
         view_logs_row.set_activatable(True)
         view_logs_row.connect("activated", self._on_view_logs_clicked)
 
@@ -734,7 +735,7 @@ class StatisticsView(Gtk.Box):
         """Update the protection status display."""
         if self._current_protection is None:
             self._protection_row.set_subtitle("Unable to determine status")
-            self._protection_row.set_icon_name("dialog-question-symbolic")
+            self._protection_row_icon.set_from_icon_name("dialog-question-symbolic")
             self._status_badge.set_label("Unknown")
             return
 
@@ -745,25 +746,25 @@ class StatisticsView(Gtk.Box):
 
         # Update icon and badge based on protection level
         if status.level == ProtectionLevel.PROTECTED.value:
-            self._protection_row.set_icon_name("emblem-ok-symbolic")
+            self._protection_row_icon.set_from_icon_name("emblem-ok-symbolic")
             self._status_badge.set_label("Protected")
             self._status_badge.remove_css_class("warning")
             self._status_badge.remove_css_class("error")
             self._status_badge.add_css_class("success")
         elif status.level == ProtectionLevel.AT_RISK.value:
-            self._protection_row.set_icon_name("dialog-warning-symbolic")
+            self._protection_row_icon.set_from_icon_name("dialog-warning-symbolic")
             self._status_badge.set_label("At Risk")
             self._status_badge.remove_css_class("success")
             self._status_badge.remove_css_class("error")
             self._status_badge.add_css_class("warning")
         elif status.level == ProtectionLevel.UNPROTECTED.value:
-            self._protection_row.set_icon_name("dialog-error-symbolic")
+            self._protection_row_icon.set_from_icon_name("dialog-error-symbolic")
             self._status_badge.set_label("Unprotected")
             self._status_badge.remove_css_class("success")
             self._status_badge.remove_css_class("warning")
             self._status_badge.add_css_class("error")
         else:
-            self._protection_row.set_icon_name("dialog-question-symbolic")
+            self._protection_row_icon.set_from_icon_name("dialog-question-symbolic")
             self._status_badge.set_label("Unknown")
             self._status_badge.remove_css_class("success")
             self._status_badge.remove_css_class("warning")
@@ -891,7 +892,7 @@ class StatisticsView(Gtk.Box):
         self._threats_label.remove_css_class("error")
 
         self._protection_row.set_subtitle("No scan history available")
-        self._protection_row.set_icon_name("dialog-information-symbolic")
+        self._protection_row_icon.set_from_icon_name("dialog-information-symbolic")
         self._status_badge.set_label("No Data")
         self._status_badge.remove_css_class("success")
         self._status_badge.remove_css_class("warning")
@@ -918,7 +919,7 @@ class StatisticsView(Gtk.Box):
         self._threats_label.remove_css_class("error")
 
         self._protection_row.set_subtitle("Unable to determine status")
-        self._protection_row.set_icon_name("dialog-error-symbolic")
+        self._protection_row_icon.set_from_icon_name("dialog-error-symbolic")
         self._status_badge.set_label("Error")
         self._status_badge.remove_css_class("success")
         self._status_badge.remove_css_class("warning")

@@ -31,6 +31,7 @@ def scan_view_class(mock_gi_modules):
     with mock.patch.dict(sys.modules, {
         'src.core.scanner': mock.MagicMock(),
         'src.core.utils': mock.MagicMock(),
+        'src.core.quarantine': mock.MagicMock(),
         'src.ui.fullscreen_dialog': mock.MagicMock(),
     }):
         from src.ui.scan_view import ScanView

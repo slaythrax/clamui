@@ -10,6 +10,8 @@ from gi.repository import Gtk, Adw, GLib
 
 from typing import TYPE_CHECKING, Optional
 
+from .utils import add_row_icon
+
 if TYPE_CHECKING:
     from ..profiles.models import ScanProfile
     from ..profiles.profile_manager import ProfileManager
@@ -198,7 +200,7 @@ class ProfileDialog(Adw.Dialog):
         self._targets_placeholder = Adw.ActionRow()
         self._targets_placeholder.set_title("No targets added")
         self._targets_placeholder.set_subtitle("Click the folder or file button to add scan targets")
-        self._targets_placeholder.set_icon_name("folder-symbolic")
+        add_row_icon(self._targets_placeholder, "folder-symbolic")
         self._targets_placeholder.add_css_class("dim-label")
         self._targets_listbox.append(self._targets_placeholder)
 
@@ -240,7 +242,7 @@ class ProfileDialog(Adw.Dialog):
         self._exclusions_placeholder = Adw.ActionRow()
         self._exclusions_placeholder.set_title("No exclusions added")
         self._exclusions_placeholder.set_subtitle("Add paths or patterns to exclude from scanning")
-        self._exclusions_placeholder.set_icon_name("action-unavailable-symbolic")
+        add_row_icon(self._exclusions_placeholder, "action-unavailable-symbolic")
         self._exclusions_placeholder.add_css_class("dim-label")
         self._exclusions_listbox.append(self._exclusions_placeholder)
 
@@ -445,7 +447,7 @@ class ProfileDialog(Adw.Dialog):
         row.set_title(path)
         if subtitle:
             row.set_subtitle(subtitle)
-        row.set_icon_name(icon_name)
+        add_row_icon(row, icon_name)
 
         # Remove button
         remove_btn = Gtk.Button()
@@ -807,7 +809,7 @@ class ProfileListDialog(Adw.Dialog):
         self._profiles_placeholder = Adw.ActionRow()
         self._profiles_placeholder.set_title("No profiles available")
         self._profiles_placeholder.set_subtitle("Click the + button to create a new profile")
-        self._profiles_placeholder.set_icon_name("document-new-symbolic")
+        add_row_icon(self._profiles_placeholder, "document-new-symbolic")
         self._profiles_placeholder.add_css_class("dim-label")
 
         self._profiles_group.add(self._profiles_listbox)
@@ -872,9 +874,9 @@ class ProfileListDialog(Adw.Dialog):
 
         # Set icon based on profile type
         if profile.is_default:
-            row.set_icon_name("emblem-default-symbolic")
+            add_row_icon(row, "emblem-default-symbolic")
         else:
-            row.set_icon_name("document-properties-symbolic")
+            add_row_icon(row, "document-properties-symbolic")
 
         # Action buttons container
         button_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)

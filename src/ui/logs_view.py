@@ -13,6 +13,7 @@ from gi.repository import Gtk, Adw, Gio, GLib
 from ..core.log_manager import LogManager, LogEntry, DaemonStatus
 from ..core.utils import copy_to_clipboard
 from .fullscreen_dialog import FullscreenLogDialog
+from .utils import add_row_icon
 
 # Pagination thresholds for historical logs
 INITIAL_LOG_DISPLAY_LIMIT = 25
@@ -386,7 +387,7 @@ class LogsView(Gtk.Box):
         self._daemon_status_row = Adw.ActionRow()
         self._daemon_status_row.set_title("Daemon Status")
         self._daemon_status_row.set_subtitle("Checking...")
-        self._daemon_status_row.set_icon_name("dialog-question-symbolic")
+        self._daemon_status_icon = add_row_icon(self._daemon_status_row, "dialog-question-symbolic")
 
         # Refresh toggle button for live updates
         self._live_toggle = Gtk.ToggleButton()
@@ -605,9 +606,9 @@ class LogsView(Gtk.Box):
 
         # Set icon based on log type
         if entry.type == "scan":
-            row.set_icon_name("folder-symbolic")
+            add_row_icon(row, "folder-symbolic")
         else:  # update
-            row.set_icon_name("software-update-available-symbolic")
+            add_row_icon(row, "software-update-available-symbolic")
 
         # Set title with summary
         row.set_title(entry.summary)
@@ -1066,18 +1067,18 @@ class LogsView(Gtk.Box):
 
         if status == DaemonStatus.RUNNING:
             self._daemon_status_row.set_subtitle("Running")
-            self._daemon_status_row.set_icon_name("emblem-ok-symbolic")
+            self._daemon_status_icon.set_from_icon_name("emblem-ok-symbolic")
             # Remove any warning/error classes and add success
             self._daemon_status_row.remove_css_class("warning")
             self._daemon_status_row.remove_css_class("error")
             self._live_toggle.set_sensitive(True)
         elif status == DaemonStatus.STOPPED:
             self._daemon_status_row.set_subtitle("Stopped")
-            self._daemon_status_row.set_icon_name("media-playback-stop-symbolic")
+            self._daemon_status_icon.set_from_icon_name("media-playback-stop-symbolic")
             self._live_toggle.set_sensitive(True)
         elif status == DaemonStatus.NOT_INSTALLED:
             self._daemon_status_row.set_subtitle("Not installed")
-            self._daemon_status_row.set_icon_name("dialog-information-symbolic")
+            self._daemon_status_icon.set_from_icon_name("dialog-information-symbolic")
             self._live_toggle.set_sensitive(False)
             # Update daemon text with helpful message
             buffer = self._daemon_text.get_buffer()
@@ -1086,7 +1087,7 @@ class LogsView(Gtk.Box):
                           "You can still use ClamUI for on-demand scanning without it.")
         else:  # UNKNOWN
             self._daemon_status_row.set_subtitle(message or "Unknown")
-            self._daemon_status_row.set_icon_name("dialog-question-symbolic")
+            self._daemon_status_icon.set_from_icon_name("dialog-question-symbolic")
             self._live_toggle.set_sensitive(False)
 
         return False  # Don't repeat

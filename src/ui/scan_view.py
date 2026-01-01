@@ -23,6 +23,7 @@ from ..core.utils import (
 )
 from ..core.quarantine import QuarantineManager, QuarantineStatus
 from .fullscreen_dialog import FullscreenLogDialog
+from .utils import add_row_icon
 from .profile_dialogs import ProfileListDialog
 
 if TYPE_CHECKING:
@@ -314,7 +315,7 @@ class ScanView(Gtk.Box):
         profile_row = Adw.ActionRow()
         profile_row.set_title("Profile")
         profile_row.set_subtitle("Choose a scan profile or use manual selection")
-        profile_row.set_icon_name("document-properties-symbolic")
+        add_row_icon(profile_row, "document-properties-symbolic")
         self._profile_row = profile_row
 
         # Create string list for dropdown
@@ -477,7 +478,7 @@ class ScanView(Gtk.Box):
             # Profile has no targets - update UI to indicate this
             self._path_row.set_title("No targets in profile")
             self._path_row.set_subtitle("Add targets to this profile or select manually")
-            self._path_row.set_icon_name("dialog-warning-symbolic")
+            self._path_row_icon.set_from_icon_name("dialog-warning-symbolic")
             self._selected_path = ""
             self._scan_button.set_sensitive(False)
             return
@@ -502,13 +503,13 @@ class ScanView(Gtk.Box):
                 )
             else:
                 self._path_row.set_subtitle(f"From profile '{profile.name}'")
-            self._path_row.set_icon_name("folder-symbolic")
+            self._path_row_icon.set_from_icon_name("folder-symbolic")
         else:
             # Path doesn't exist - show warning but still allow selection
             display_path = format_scan_path(expanded_path)
             self._path_row.set_title(display_path)
             self._path_row.set_subtitle(f"Path not found - from profile '{profile.name}'")
-            self._path_row.set_icon_name("dialog-warning-symbolic")
+            self._path_row_icon.set_from_icon_name("dialog-warning-symbolic")
             self._selected_path = expanded_path
             # Still enable scan button - path might become available or user can fix
             self._scan_button.set_sensitive(True)
@@ -597,7 +598,7 @@ class ScanView(Gtk.Box):
         self._path_row = Adw.ActionRow()
         self._path_row.set_title("No folder selected")
         self._path_row.set_subtitle("Click 'Select Folder' to choose a location")
-        self._path_row.set_icon_name("folder-symbolic")
+        self._path_row_icon = add_row_icon(self._path_row, "folder-symbolic")
 
         # Select folder button
         select_folder_btn = Gtk.Button()
@@ -1363,7 +1364,7 @@ class ScanView(Gtk.Box):
         subtitle_parts.append(f"{total_files} total files checked")
         summary_row.set_subtitle(" • ".join(subtitle_parts))
 
-        summary_row.set_icon_name("emblem-ok-symbolic")
+        add_row_icon(summary_row, "emblem-ok-symbolic")
         summary_row.add_css_class("success")
 
         return summary_row
@@ -1438,7 +1439,7 @@ class ScanView(Gtk.Box):
             "low": "dialog-information-symbolic"
         }
         icon_name = severity_icons.get(threat_detail.severity, "emblem-important-symbolic")
-        expander.set_icon_name(icon_name)
+        add_row_icon(expander, icon_name)
 
         # Create severity badge
         severity_badge = Gtk.Label()

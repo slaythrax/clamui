@@ -10,6 +10,7 @@ from gi.repository import Gtk, Adw, GLib
 
 from ..core.utils import check_clamav_installed, check_freshclam_installed, check_clamdscan_installed
 from ..core.log_manager import LogManager, DaemonStatus
+from .utils import add_row_icon
 
 
 # Setup guide content for each component
@@ -113,7 +114,7 @@ class ComponentsView(Gtk.Box):
         info_row = Adw.ActionRow()
         info_row.set_title("Component Status")
         info_row.set_subtitle("View installation status and setup guides for ClamAV tools")
-        info_row.set_icon_name("applications-system-symbolic")
+        add_row_icon(info_row, "applications-system-symbolic")
 
         info_group.add(info_row)
         self.append(info_group)
@@ -157,7 +158,7 @@ class ComponentsView(Gtk.Box):
         expander = Adw.ExpanderRow()
         expander.set_title(title)
         expander.set_subtitle("Checking...")
-        expander.set_icon_name(icon_name)
+        add_row_icon(expander, icon_name)
 
         # Add status suffix widget
         status_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
