@@ -478,20 +478,19 @@ class ScanView(Gtk.Box):
             return
 
         # Open profile list dialog
-        dialog = ProfileListDialog()
-        dialog.set_modal(True)
-        dialog.set_transient_for(root)
-        dialog.connect("profiles-changed", self._on_profiles_changed)
-        dialog.present()
+        profile_manager = self._get_profile_manager()
+        dialog = ProfileListDialog(profile_manager=profile_manager)
+        dialog.connect("closed", self._on_profiles_dialog_closed)
+        dialog.present(root)
 
-    def _on_profiles_changed(self, dialog):
+    def _on_profiles_dialog_closed(self, dialog):
         """
-        Handle profile changes from profile dialog.
+        Handle profile dialog closed.
 
-        Refreshes the profile dropdown when profiles are modified.
+        Refreshes the profile dropdown when the profile dialog is closed.
 
         Args:
-            dialog: The ProfileListDialog that was modified
+            dialog: The ProfileListDialog that was closed
         """
         self.refresh_profiles()
 
@@ -700,8 +699,8 @@ class ScanView(Gtk.Box):
 
             # Log summary
             logger.info(
-                f"Scan complete: {result.threat_count} threats found, "
-                f"{result.clean_count} clean files"
+                f"Scan complete: {result.infected_count} threats found, "
+                f"{result.scanned_files} files scanned"
             )
         except Exception as e:
             logger.error(f"Scan error: {e}")
@@ -804,16 +803,16 @@ class ScanView(Gtk.Box):
         self._load_more_threats(INITIAL_DISPLAY_LIMIT)
 
         # Update status banner
-        if result.threat_count > 0:
+        if result.infected_count > 0:
             self._status_banner.set_title(
-                f"Scan complete: {result.threat_count} threat(s) found"
+                f"Scan complete: {result.infected_count} threat(s) found"
             )
             self._status_banner.add_css_class("error")
             self._status_banner.remove_css_class("success")
             self._status_banner.remove_css_class("warning")
         else:
             self._status_banner.set_title(
-                f"Scan complete: No threats found ({result.clean_count} files scanned)"
+                f"Scan complete: No threats found ({result.scanned_files} files scanned)"
             )
             self._status_banner.add_css_class("success")
             self._status_banner.remove_css_class("error")
@@ -886,16 +885,16 @@ class ScanView(Gtk.Box):
         header_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
 
         # Threat name
-        name_label = Gtk.Label(label=threat.name)
+        name_label = Gtk.Label(label=threat.threat_name)
         name_label.set_halign(Gtk.Align.START)
         name_label.set_hexpand(True)
         name_label.add_css_class("title-3")
         header_box.append(name_label)
 
         # Severity badge
-        severity_badge = Gtk.Label(label=threat.severity.value.upper())
+        severity_badge = Gtk.Label(label=threat.severity.upper())
         severity_badge.add_css_class("severity-badge")
-        severity_badge.add_css_class(f"severity-{threat.severity.value}")
+        severity_badge.add_css_class(f"severity-{threat.severity}")
         header_box.append(severity_badge)
 
         container.append(header_box)
@@ -909,21 +908,12 @@ class ScanView(Gtk.Box):
         path_label.add_css_class("dim-label")
         container.append(path_label)
 
-        # Recommended action
-        if threat.recommended_action:
-            action_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
-            action_label = Gtk.Label(label="Recommended Action:")
-            action_label.set_halign(Gtk.Align.START)
-            action_label.add_css_class("heading")
-            action_box.append(action_label)
-
-            action_text = Gtk.Label(label=threat.recommended_action)
-            action_text.set_wrap(True)
-            action_text.set_halign(Gtk.Align.START)
-            action_text.add_css_class("recommended-action")
-            action_box.append(action_text)
-
-            container.append(action_box)
+        # Category info
+        if threat.category:
+            category_label = Gtk.Label(label=f"Category: {threat.category}")
+            category_label.set_halign(Gtk.Align.START)
+            category_label.add_css_class("dim-label")
+            container.append(category_label)
 
         # Action buttons
         button_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
@@ -965,10 +955,12 @@ class ScanView(Gtk.Box):
             threat: The ThreatDetail to quarantine
         """
         try:
-            status = self._quarantine_manager.quarantine_file(threat.file_path)
+            result = self._quarantine_manager.quarantine_file(
+                threat.file_path, threat.threat_name
+            )
 
-            if status == QuarantineStatus.SUCCESS:
-                self._status_banner.set_title(f"Quarantined: {threat.name}")
+            if result.status == QuarantineStatus.SUCCESS:
+                self._status_banner.set_title(f"Quarantined: {threat.threat_name}")
                 self._status_banner.add_css_class("success")
                 self._status_banner.remove_css_class("error")
                 self._status_banner.remove_css_class("warning")
@@ -976,18 +968,31 @@ class ScanView(Gtk.Box):
                 button.set_sensitive(False)
                 button.set_label("Quarantined")
             else:
-                error_msg = "Unknown error"
-                if status == QuarantineStatus.ALREADY_QUARANTINED:
+                error_msg = result.error_message or "Unknown error"
+                is_handled = False
+
+                if result.status == QuarantineStatus.ALREADY_QUARANTINED:
                     error_msg = "File is already quarantined"
-                elif status == QuarantineStatus.NOT_FOUND:
-                    error_msg = "File not found"
-                elif status == QuarantineStatus.PERMISSION_DENIED:
+                    is_handled = True
+                elif result.status == QuarantineStatus.FILE_NOT_FOUND:
+                    # File may have been removed by ClamAV daemon's on-access scanning
+                    error_msg = "File not found - may have been handled by ClamAV daemon"
+                    is_handled = True
+                    button.set_sensitive(False)
+                    button.set_label("Handled")
+                elif result.status == QuarantineStatus.PERMISSION_DENIED:
                     error_msg = "Permission denied"
 
-                self._status_banner.set_title(f"Quarantine failed: {error_msg}")
-                self._status_banner.add_css_class("error")
-                self._status_banner.remove_css_class("success")
-                self._status_banner.remove_css_class("warning")
+                if is_handled:
+                    self._status_banner.set_title(error_msg)
+                    self._status_banner.add_css_class("warning")
+                    self._status_banner.remove_css_class("success")
+                    self._status_banner.remove_css_class("error")
+                else:
+                    self._status_banner.set_title(f"Quarantine failed: {error_msg}")
+                    self._status_banner.add_css_class("error")
+                    self._status_banner.remove_css_class("success")
+                    self._status_banner.remove_css_class("warning")
 
             self._status_banner.set_revealed(True)
         except Exception as e:

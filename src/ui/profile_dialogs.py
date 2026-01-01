@@ -763,12 +763,6 @@ class ProfileListDialog(Adw.Dialog):
         # Create header bar with new profile button
         header_bar = Adw.HeaderBar()
 
-        # Close button
-        close_button = Gtk.Button()
-        close_button.set_label("Close")
-        close_button.connect("clicked", self._on_close_clicked)
-        header_bar.pack_start(close_button)
-
         # Import profile button
         import_button = Gtk.Button()
         import_button.set_icon_name("document-open-symbolic")
@@ -927,10 +921,6 @@ class ProfileListDialog(Adw.Dialog):
         row.connect("activated", lambda r, p=profile: self._on_use_profile_clicked(p))
 
         return row
-
-    def _on_close_clicked(self, button):
-        """Handle close button click."""
-        self.close()
 
     def _on_import_clicked(self, button):
         """Handle import button click."""
