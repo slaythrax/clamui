@@ -169,15 +169,15 @@ class TestDaemonScannerParseResults:
         """Test parsing clean scan results."""
         scanner = daemon_scanner_class()
 
+        # clamdscan output doesn't include file/directory counts,
+        # so they are passed as parameters from pre-counting
         stdout = """
 /home/user/test.txt: OK
 
 ----------- SCAN SUMMARY -----------
-Scanned files: 1
-Scanned directories: 0
 Infected files: 0
 """
-        result = scanner._parse_results("/home/user", stdout, "", 0)
+        result = scanner._parse_results("/home/user", stdout, "", 0, file_count=1, dir_count=0)
 
         assert result.status == scan_status_class.CLEAN
         assert result.infected_count == 0
@@ -187,15 +187,14 @@ Infected files: 0
         """Test parsing infected scan results."""
         scanner = daemon_scanner_class()
 
+        # clamdscan output with -i flag only shows infected files
         stdout = """
 /home/user/malware.exe: Win.Trojan.Agent FOUND
 
 ----------- SCAN SUMMARY -----------
-Scanned files: 1
-Scanned directories: 0
 Infected files: 1
 """
-        result = scanner._parse_results("/home/user", stdout, "", 1)
+        result = scanner._parse_results("/home/user", stdout, "", 1, file_count=1, dir_count=0)
 
         assert result.status == scan_status_class.INFECTED
         assert result.infected_count == 1

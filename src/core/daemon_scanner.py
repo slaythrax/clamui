@@ -5,6 +5,7 @@ Provides faster scanning by leveraging the ClamAV daemon's in-memory database.
 """
 
 import fnmatch
+import os
 import re
 import subprocess
 import threading
@@ -135,6 +136,9 @@ class DaemonScanner:
             self._save_scan_log(result, duration)
             return result
 
+        # Count files/directories before scanning (clamdscan doesn't report these)
+        file_count, dir_count = self._count_scan_targets(path, profile_exclusions)
+
         # Build clamdscan command
         cmd = self._build_command(path, recursive, profile_exclusions)
 
@@ -160,8 +164,8 @@ class DaemonScanner:
                     stderr=stderr,
                     exit_code=exit_code,
                     infected_files=[],
-                    scanned_files=0,
-                    scanned_dirs=0,
+                    scanned_files=file_count,
+                    scanned_dirs=dir_count,
                     infected_count=0,
                     error_message="Scan cancelled by user",
                     threat_details=[]
@@ -171,7 +175,7 @@ class DaemonScanner:
                 return result
 
             # Parse the results
-            result = self._parse_results(path, stdout, stderr, exit_code)
+            result = self._parse_results(path, stdout, stderr, exit_code, file_count, dir_count)
             duration = time.monotonic() - start_time
             self._save_scan_log(result, duration)
             return result
@@ -338,6 +342,128 @@ class DaemonScanner:
         cmd.append(path)
         return wrap_host_command(cmd)
 
+    def _count_scan_targets(
+        self,
+        path: str,
+        profile_exclusions: dict | None = None
+    ) -> tuple[int, int]:
+        """
+        Count files and directories that will be scanned.
+
+        Since clamdscan doesn't report file/directory counts in its output,
+        we count them ourselves before scanning.
+
+        Args:
+            path: Path to scan
+            profile_exclusions: Optional exclusions from a scan profile.
+
+        Returns:
+            Tuple of (file_count, dir_count)
+        """
+        scan_path = Path(path)
+
+        # Single file scan
+        if scan_path.is_file():
+            return (1, 0)
+
+        # Not a valid path
+        if not scan_path.is_dir():
+            return (0, 0)
+
+        # Collect exclusion patterns
+        exclude_patterns: list[str] = []
+        exclude_dirs: list[str] = []
+
+        # Global exclusions from settings
+        if self._settings_manager is not None:
+            exclusions = self._settings_manager.get('exclusion_patterns', [])
+            for exclusion in exclusions:
+                if not exclusion.get('enabled', True):
+                    continue
+                pattern = exclusion.get('pattern', '')
+                if not pattern:
+                    continue
+                exclusion_type = exclusion.get('type', 'pattern')
+                if exclusion_type == 'directory':
+                    exclude_dirs.append(pattern)
+                else:
+                    exclude_patterns.append(pattern)
+
+        # Profile exclusions
+        if profile_exclusions:
+            for excl_path in profile_exclusions.get('paths', []):
+                if excl_path:
+                    # Expand ~ in paths
+                    if excl_path.startswith('~'):
+                        excl_path = str(Path(excl_path).expanduser())
+                    exclude_dirs.append(excl_path)
+
+            for pattern in profile_exclusions.get('patterns', []):
+                if pattern:
+                    exclude_patterns.append(pattern)
+
+        file_count = 0
+        dir_count = 0
+
+        try:
+            for root, dirs, files in os.walk(path):
+                # Filter out excluded directories (modifies dirs in-place)
+                dirs[:] = [
+                    d for d in dirs
+                    if not self._is_excluded(os.path.join(root, d), d, exclude_dirs, is_dir=True)
+                ]
+
+                # Count directories (excluding the root)
+                dir_count += len(dirs)
+
+                # Count files that aren't excluded
+                for f in files:
+                    file_path = os.path.join(root, f)
+                    if not self._is_excluded(file_path, f, exclude_patterns, is_dir=False):
+                        file_count += 1
+        except (PermissionError, OSError):
+            # If we can't access the directory, return 0 counts
+            pass
+
+        # Count the root directory itself
+        if dir_count > 0 or file_count > 0:
+            dir_count += 1
+
+        return (file_count, dir_count)
+
+    def _is_excluded(
+        self,
+        full_path: str,
+        name: str,
+        patterns: list[str],
+        is_dir: bool
+    ) -> bool:
+        """
+        Check if a path matches any exclusion pattern.
+
+        Args:
+            full_path: Full path to check
+            name: Base name of the file/directory
+            patterns: List of exclusion patterns (glob or path)
+            is_dir: Whether this is a directory
+
+        Returns:
+            True if the path should be excluded
+        """
+        for pattern in patterns:
+            # Check if pattern is an absolute path
+            if pattern.startswith('/') or pattern.startswith('~'):
+                expanded = str(Path(pattern).expanduser()) if pattern.startswith('~') else pattern
+                if full_path.startswith(expanded):
+                    return True
+            # Check glob pattern against filename
+            elif fnmatch.fnmatch(name, pattern):
+                return True
+            # Check glob pattern against full path
+            elif fnmatch.fnmatch(full_path, pattern):
+                return True
+        return False
+
     def _classify_threat_severity(self, threat_name: str) -> str:
         """Classify threat severity level."""
         if not threat_name:
@@ -408,12 +534,17 @@ class DaemonScanner:
         path: str,
         stdout: str,
         stderr: str,
-        exit_code: int
+        exit_code: int,
+        file_count: int = 0,
+        dir_count: int = 0
     ) -> ScanResult:
         """
         Parse clamdscan output into a ScanResult.
 
-        clamdscan output format is similar to clamscan.
+        clamdscan output format is similar to clamscan but doesn't include
+        file/directory counts in the summary. These are provided separately
+        via the file_count and dir_count parameters.
+
         Exit codes: 0=clean, 1=infected, 2=error
 
         Args:
@@ -421,14 +552,16 @@ class DaemonScanner:
             stdout: Standard output from clamdscan
             stderr: Standard error from clamdscan
             exit_code: Process exit code
+            file_count: Pre-counted number of files scanned
+            dir_count: Pre-counted number of directories scanned
 
         Returns:
             Parsed ScanResult
         """
         infected_files = []
         threat_details = []
-        scanned_files = 0
-        scanned_dirs = 0
+        scanned_files = file_count
+        scanned_dirs = dir_count
         infected_count = 0
 
         for line in stdout.splitlines():
@@ -451,15 +584,6 @@ class DaemonScanner:
                     )
                     threat_details.append(threat_detail)
                     infected_count += 1
-
-            elif line.startswith("Scanned files:"):
-                match = re.search(r"Scanned files:\s*(\d+)", line)
-                if match:
-                    scanned_files = int(match.group(1))
-            elif line.startswith("Scanned directories:"):
-                match = re.search(r"Scanned directories:\s*(\d+)", line)
-                if match:
-                    scanned_dirs = int(match.group(1))
 
         if exit_code == 0:
             status = ScanStatus.CLEAN
