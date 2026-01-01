@@ -23,6 +23,7 @@ def ensure_fresh_scanner_import():
     as globals so tests can use Scanner, ScanResult, etc.
     """
     global Scanner, ScanResult, ScanStatus, ThreatDetail, glob_to_regex, validate_pattern
+    global classify_threat_severity_str, categorize_threat
 
     # Clear any cached src modules before test
     _clear_src_modules()
@@ -36,12 +37,18 @@ def ensure_fresh_scanner_import():
         glob_to_regex as _glob_to_regex,
         validate_pattern as _validate_pattern,
     )
+    from src.core.threat_classifier import (
+        classify_threat_severity_str as _classify_threat_severity_str,
+        categorize_threat as _categorize_threat,
+    )
     Scanner = _Scanner
     ScanResult = _ScanResult
     ScanStatus = _ScanStatus
     ThreatDetail = _ThreatDetail
     glob_to_regex = _glob_to_regex
     validate_pattern = _validate_pattern
+    classify_threat_severity_str = _classify_threat_severity_str
+    categorize_threat = _categorize_threat
 
     yield
 
@@ -56,6 +63,8 @@ ScanStatus = None
 ThreatDetail = None
 glob_to_regex = None
 validate_pattern = None
+classify_threat_severity_str = None
+categorize_threat = None
 
 
 @pytest.fixture
@@ -572,53 +581,49 @@ Infected files: 3
         assert result.threat_details[2].severity == "critical"
 
     def test_classify_threat_severity(self):
-        """Test _classify_threat_severity returns correct severity levels."""
-        scanner = Scanner()
-
+        """Test classify_threat_severity_str returns correct severity levels."""
         # Critical threats
-        assert scanner._classify_threat_severity("Ransomware.Locky") == "critical"
-        assert scanner._classify_threat_severity("Win.Rootkit.Agent") == "critical"
-        assert scanner._classify_threat_severity("Bootkit.MBR") == "critical"
-        assert scanner._classify_threat_severity("CryptoLocker.A") == "critical"
+        assert classify_threat_severity_str("Ransomware.Locky") == "critical"
+        assert classify_threat_severity_str("Win.Rootkit.Agent") == "critical"
+        assert classify_threat_severity_str("Bootkit.MBR") == "critical"
+        assert classify_threat_severity_str("CryptoLocker.A") == "critical"
 
         # High threats
-        assert scanner._classify_threat_severity("Trojan.Banker") == "high"
-        assert scanner._classify_threat_severity("Worm.Mydoom") == "high"
-        assert scanner._classify_threat_severity("Backdoor.IRC") == "high"
-        assert scanner._classify_threat_severity("Exploit.CVE2021") == "high"
-        assert scanner._classify_threat_severity("Downloader.Agent") == "high"
+        assert classify_threat_severity_str("Trojan.Banker") == "high"
+        assert classify_threat_severity_str("Worm.Mydoom") == "high"
+        assert classify_threat_severity_str("Backdoor.IRC") == "high"
+        assert classify_threat_severity_str("Exploit.CVE2021") == "high"
+        assert classify_threat_severity_str("Downloader.Agent") == "high"
 
         # Medium threats
-        assert scanner._classify_threat_severity("PUA.Adware.Generic") == "medium"
-        assert scanner._classify_threat_severity("Spyware.Keylogger") == "high"  # keylogger = high
-        assert scanner._classify_threat_severity("Coinminer.Generic") == "medium"
-        assert scanner._classify_threat_severity("Unknown.Malware") == "medium"
+        assert classify_threat_severity_str("PUA.Adware.Generic") == "medium"
+        assert classify_threat_severity_str("Spyware.Keylogger") == "high"  # keylogger = high
+        assert classify_threat_severity_str("Coinminer.Generic") == "medium"
+        assert classify_threat_severity_str("Unknown.Malware") == "medium"
 
         # Low threats
-        assert scanner._classify_threat_severity("Eicar-Test-Signature") == "low"
-        assert scanner._classify_threat_severity("Heuristic.Generic") == "low"
+        assert classify_threat_severity_str("Eicar-Test-Signature") == "low"
+        assert classify_threat_severity_str("Heuristic.Generic") == "low"
 
         # Edge cases
-        assert scanner._classify_threat_severity("") == "medium"
+        assert classify_threat_severity_str("") == "medium"
 
     def test_categorize_threat(self):
-        """Test _categorize_threat extracts correct category from threat name."""
-        scanner = Scanner()
-
+        """Test categorize_threat extracts correct category from threat name."""
         # Specific categories
-        assert scanner._categorize_threat("Win.Trojan.Agent") == "Trojan"
-        assert scanner._categorize_threat("Worm.Mydoom") == "Worm"
-        assert scanner._categorize_threat("Ransomware.Locky") == "Ransomware"
-        assert scanner._categorize_threat("Win.Rootkit.Agent") == "Rootkit"
-        assert scanner._categorize_threat("Backdoor.IRC") == "Backdoor"
-        assert scanner._categorize_threat("Exploit.PDF") == "Exploit"
-        assert scanner._categorize_threat("PUA.Adware.Generic") == "Adware"
-        assert scanner._categorize_threat("Eicar-Test-Signature") == "Test"
-        assert scanner._categorize_threat("Phishing.Email") == "Phishing"
+        assert categorize_threat("Win.Trojan.Agent") == "Trojan"
+        assert categorize_threat("Worm.Mydoom") == "Worm"
+        assert categorize_threat("Ransomware.Locky") == "Ransomware"
+        assert categorize_threat("Win.Rootkit.Agent") == "Rootkit"
+        assert categorize_threat("Backdoor.IRC") == "Backdoor"
+        assert categorize_threat("Exploit.PDF") == "Exploit"
+        assert categorize_threat("PUA.Adware.Generic") == "Adware"
+        assert categorize_threat("Eicar-Test-Signature") == "Test"
+        assert categorize_threat("Phishing.Email") == "Phishing"
 
         # Default category for unknown
-        assert scanner._categorize_threat("Unknown.Malware") == "Virus"
-        assert scanner._categorize_threat("") == "Unknown"
+        assert categorize_threat("Unknown.Malware") == "Virus"
+        assert categorize_threat("") == "Unknown"
 
 
 class TestScannerThreatDetailsIntegration:
@@ -1441,43 +1446,36 @@ class TestThreatClassificationEdgeCases:
     """Tests for threat classification edge cases."""
 
     def test_classify_threat_severity_empty_string(self):
-        """Test _classify_threat_severity handles empty threat name."""
-        scanner = Scanner()
-        assert scanner._classify_threat_severity("") == "medium"
+        """Test classify_threat_severity_str handles empty threat name."""
+        assert classify_threat_severity_str("") == "medium"
 
     def test_classify_threat_severity_whitespace_only(self):
-        """Test _classify_threat_severity handles whitespace-only threat name."""
-        scanner = Scanner()
-        assert scanner._classify_threat_severity("   ") == "medium"
+        """Test classify_threat_severity_str handles whitespace-only threat name."""
+        assert classify_threat_severity_str("   ") == "medium"
 
     def test_classify_threat_severity_mixed_case(self):
-        """Test _classify_threat_severity handles mixed case threat names."""
-        scanner = Scanner()
-        assert scanner._classify_threat_severity("RANSOMWARE.WannaCry") == "critical"
-        assert scanner._classify_threat_severity("Trojan.BANKER") == "high"
-        assert scanner._classify_threat_severity("PUA.AdWaRe") == "medium"
+        """Test classify_threat_severity_str handles mixed case threat names."""
+        assert classify_threat_severity_str("RANSOMWARE.WannaCry") == "critical"
+        assert classify_threat_severity_str("Trojan.BANKER") == "high"
+        assert classify_threat_severity_str("PUA.AdWaRe") == "medium"
 
     def test_categorize_threat_empty_string(self):
-        """Test _categorize_threat handles empty threat name."""
-        scanner = Scanner()
-        assert scanner._categorize_threat("") == "Unknown"
+        """Test categorize_threat handles empty threat name."""
+        assert categorize_threat("") == "Unknown"
 
     def test_categorize_threat_whitespace_only(self):
-        """Test _categorize_threat handles whitespace-only threat name."""
-        scanner = Scanner()
-        assert scanner._categorize_threat("   ") == "Virus"  # Default category
+        """Test categorize_threat handles whitespace-only threat name."""
+        assert categorize_threat("   ") == "Virus"  # Default category
 
     def test_categorize_threat_unknown_format(self):
-        """Test _categorize_threat handles unknown threat format."""
-        scanner = Scanner()
+        """Test categorize_threat handles unknown threat format."""
         # A threat name that doesn't match any known pattern
-        assert scanner._categorize_threat("CustomMalware.123") == "Virus"
+        assert categorize_threat("CustomMalware.123") == "Virus"
 
     def test_categorize_threat_multiple_keywords(self):
-        """Test _categorize_threat prioritizes correctly when multiple keywords present."""
-        scanner = Scanner()
+        """Test categorize_threat prioritizes correctly when multiple keywords present."""
         # Contains both "trojan" and "worm" - should pick first match
-        result = scanner._categorize_threat("Trojan.Worm.Agent")
+        result = categorize_threat("Trojan.Worm.Agent")
         # "trojan" comes before "worm" in the category_patterns list
         assert result in ["Trojan", "Worm"]
 

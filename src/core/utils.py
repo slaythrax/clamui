@@ -10,20 +10,19 @@ import shutil
 import subprocess
 import threading
 from datetime import datetime
-from enum import Enum
 from pathlib import Path
 from typing import Tuple, Optional, List, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from .scanner import ScanResult
 
-
-class ThreatSeverity(Enum):
-    """Severity level of a detected threat."""
-    CRITICAL = "critical"     # Ransomware, Rootkit, Bootkit
-    HIGH = "high"             # Trojan, Worm, Backdoor, Exploit
-    MEDIUM = "medium"         # Adware, PUA, Spyware, Unknown
-    LOW = "low"               # Test signatures (EICAR), Generic detections
+# Re-export threat classification utilities for backwards compatibility
+from .threat_classifier import (
+    ThreatSeverity,
+    categorize_threat,
+    classify_threat_severity,
+    classify_threat_severity_str,
+)
 
 
 # Flatpak detection cache (None = not checked, True/False = result)
@@ -455,161 +454,6 @@ def format_scan_path(path: str) -> str:
         return str(resolved)
     except (OSError, RuntimeError):
         return path
-
-
-def categorize_threat(threat_name: str) -> str:
-    """
-    Extract the category of a threat from its name.
-
-    ClamAV threat names typically follow patterns that indicate the threat type.
-    This function analyzes the threat name to extract a human-readable category.
-
-    Categories returned:
-    - Ransomware: Ransomware, CryptoLocker variants
-    - Rootkit: Rootkits and bootkits
-    - Trojan: Trojan horse malware
-    - Worm: Self-replicating worms
-    - Backdoor: Backdoor access tools
-    - Exploit: Vulnerability exploits
-    - Adware: Advertising software
-    - Spyware: Spyware and keyloggers
-    - PUA: Potentially Unwanted Applications
-    - Test: Test signatures (EICAR)
-    - Virus: Generic viruses
-    - Macro: Macro viruses
-    - Phishing: Phishing attempts
-    - Heuristic: Heuristic detections
-    - Unknown: Cannot determine category
-
-    Args:
-        threat_name: The threat name from ClamAV output (e.g., "Win.Trojan.Agent")
-
-    Returns:
-        Category as string (e.g., 'Virus', 'Trojan', 'Worm', etc.)
-
-    Example:
-        >>> categorize_threat("Win.Trojan.Agent")
-        'Trojan'
-
-        >>> categorize_threat("Eicar-Test-Signature")
-        'Test'
-    """
-    if not threat_name:
-        return "Unknown"
-
-    name_lower = threat_name.lower()
-
-    # High-priority specific categories (more specific than generic PUA/PUP/Virus)
-    # Within each tier, we use position-based matching (earliest match wins)
-    high_priority_patterns = [
-        ('ransomware', 'Ransomware'),
-        ('ransom', 'Ransomware'),
-        ('rootkit', 'Rootkit'),
-        ('bootkit', 'Rootkit'),
-        ('trojan', 'Trojan'),
-        ('worm', 'Worm'),
-        ('backdoor', 'Backdoor'),
-        ('exploit', 'Exploit'),
-        ('adware', 'Adware'),
-        ('spyware', 'Spyware'),
-        ('keylogger', 'Spyware'),
-        ('eicar', 'Test'),
-        ('test-signature', 'Test'),
-        ('test.file', 'Test'),
-        ('macro', 'Macro'),
-        ('phish', 'Phishing'),
-        ('heuristic', 'Heuristic'),
-    ]
-
-    # Low-priority generic categories (used only if no specific category found)
-    low_priority_patterns = [
-        ('pua', 'PUA'),
-        ('pup', 'PUA'),
-        ('virus', 'Virus'),
-    ]
-
-    # First, check high-priority patterns by position
-    matches = []
-    for pattern, category in high_priority_patterns:
-        pos = name_lower.find(pattern)
-        if pos != -1:
-            matches.append((pos, category))
-
-    if matches:
-        matches.sort(key=lambda x: x[0])
-        return matches[0][1]
-
-    # If no high-priority match, check low-priority patterns
-    for pattern, category in low_priority_patterns:
-        pos = name_lower.find(pattern)
-        if pos != -1:
-            matches.append((pos, category))
-
-    if matches:
-        matches.sort(key=lambda x: x[0])
-        return matches[0][1]
-
-    # Default to "Virus" for unrecognized threats (conservative assumption)
-    return "Virus"
-
-
-def classify_threat_severity(threat_name: str) -> ThreatSeverity:
-    """
-    Classify the severity level of a threat based on its name.
-
-    ClamAV threat names typically follow patterns that indicate the threat type.
-    This function analyzes the threat name to determine the severity level.
-
-    Severity levels:
-    - CRITICAL: Ransomware, Rootkit, Bootkit (most dangerous, can cause data loss or system compromise)
-    - HIGH: Trojan, Worm, Backdoor, Exploit (serious threats requiring immediate attention)
-    - MEDIUM: Adware, PUA, Spyware (less severe but still concerning)
-    - LOW: Test signatures (EICAR), Generic/Heuristic detections
-
-    Args:
-        threat_name: The threat name from ClamAV output (e.g., "Win.Trojan.Agent")
-
-    Returns:
-        ThreatSeverity enum value
-
-    Example:
-        >>> classify_threat_severity("Win.Ransomware.Locky")
-        ThreatSeverity.CRITICAL
-
-        >>> classify_threat_severity("Eicar-Test-Signature")
-        ThreatSeverity.LOW
-    """
-    if not threat_name:
-        return ThreatSeverity.MEDIUM
-
-    name_lower = threat_name.lower()
-
-    # Critical: Most dangerous threats - ransomware, rootkits, bootkits
-    critical_patterns = ['ransom', 'rootkit', 'bootkit', 'cryptolocker', 'wannacry']
-    for pattern in critical_patterns:
-        if pattern in name_lower:
-            return ThreatSeverity.CRITICAL
-
-    # High: Serious threats requiring immediate attention
-    high_patterns = ['trojan', 'worm', 'backdoor', 'exploit', 'downloader', 'dropper', 'keylogger']
-    for pattern in high_patterns:
-        if pattern in name_lower:
-            return ThreatSeverity.HIGH
-
-    # Medium: Less severe but still concerning threats
-    medium_patterns = ['adware', 'pua', 'pup', 'spyware', 'miner', 'coinminer']
-    for pattern in medium_patterns:
-        if pattern in name_lower:
-            return ThreatSeverity.MEDIUM
-
-    # Low: Test files and generic/heuristic detections
-    low_patterns = ['eicar', 'test-signature', 'test.file', 'heuristic', 'generic']
-    for pattern in low_patterns:
-        if pattern in name_lower:
-            return ThreatSeverity.LOW
-
-    # Default to medium for unknown threats
-    return ThreatSeverity.MEDIUM
 
 
 def get_path_info(path: str) -> dict:

@@ -20,6 +20,10 @@ if TYPE_CHECKING:
 
 from .log_manager import LogEntry, LogManager
 from .settings_manager import SettingsManager
+from .threat_classifier import (
+    categorize_threat,
+    classify_threat_severity_str,
+)
 from .utils import (
     check_clamav_installed,
     check_clamd_connection,
@@ -512,105 +516,6 @@ class Scanner:
         # Wrap with flatpak-spawn if running inside Flatpak sandbox
         return wrap_host_command(cmd)
 
-    def _classify_threat_severity(self, threat_name: str) -> str:
-        """
-        Classify the severity level of a threat based on its name.
-
-        Severity levels:
-        - critical: Ransomware, Rootkit, Bootkit
-        - high: Trojan, Worm, Backdoor, Exploit
-        - medium: Adware, PUA (Potentially Unwanted Application), Spyware, Unknown
-        - low: Test signatures (EICAR), Generic/Heuristic detections (when standalone)
-
-        Args:
-            threat_name: The threat name from ClamAV output
-
-        Returns:
-            Severity level as string: 'critical', 'high', 'medium', or 'low'
-        """
-        if not threat_name:
-            return "medium"
-
-        name_lower = threat_name.lower()
-
-        # Critical: Most dangerous threats
-        critical_patterns = ['ransom', 'rootkit', 'bootkit', 'cryptolocker', 'wannacry']
-        for pattern in critical_patterns:
-            if pattern in name_lower:
-                return "critical"
-
-        # High: Serious threats
-        high_patterns = ['trojan', 'worm', 'backdoor', 'exploit', 'downloader', 'dropper', 'keylogger']
-        for pattern in high_patterns:
-            if pattern in name_lower:
-                return "high"
-
-        # Medium: Less severe but still concerning
-        medium_patterns = ['adware', 'pua', 'pup', 'spyware', 'miner', 'coinminer']
-        for pattern in medium_patterns:
-            if pattern in name_lower:
-                return "medium"
-
-        # Low: Test files and generic/heuristic detections
-        low_patterns = ['eicar', 'test-signature', 'test.file', 'heuristic', 'generic']
-        for pattern in low_patterns:
-            if pattern in name_lower:
-                return "low"
-
-        # Default to medium for unknown threats
-        return "medium"
-
-    def _categorize_threat(self, threat_name: str) -> str:
-        """
-        Extract the category of a threat from its name.
-
-        ClamAV threat names typically follow patterns like:
-        - "Win.Trojan.Agent" -> "Trojan"
-        - "Eicar-Test-Signature" -> "Test"
-        - "PUA.Win.Adware.Generic" -> "Adware"
-
-        Args:
-            threat_name: The threat name from ClamAV output
-
-        Returns:
-            Category as string (e.g., 'Virus', 'Trojan', 'Worm', etc.)
-        """
-        if not threat_name:
-            return "Unknown"
-
-        name_lower = threat_name.lower()
-
-        # Check for specific categories in order of specificity
-        category_patterns = [
-            ('ransomware', 'Ransomware'),
-            ('ransom', 'Ransomware'),
-            ('rootkit', 'Rootkit'),
-            ('bootkit', 'Rootkit'),
-            ('trojan', 'Trojan'),
-            ('worm', 'Worm'),
-            ('backdoor', 'Backdoor'),
-            ('exploit', 'Exploit'),
-            ('adware', 'Adware'),
-            ('spyware', 'Spyware'),
-            ('keylogger', 'Spyware'),
-            ('pua', 'PUA'),
-            ('pup', 'PUA'),
-            ('eicar', 'Test'),
-            ('test-signature', 'Test'),
-            ('test.file', 'Test'),
-            ('virus', 'Virus'),
-            ('macro', 'Macro'),
-            ('phish', 'Phishing'),
-            ('heuristic', 'Heuristic'),
-        ]
-
-        for pattern, category in category_patterns:
-            if pattern in name_lower:
-                return category
-
-        # Default to "Virus" for unrecognized threats (conservative assumption)
-        return "Virus"
-
     def _parse_results(
         self,
         path: str,
@@ -662,8 +567,8 @@ class Scanner:
                     threat_detail = ThreatDetail(
                         file_path=file_path,
                         threat_name=threat_name,
-                        category=self._categorize_threat(threat_name),
-                        severity=self._classify_threat_severity(threat_name)
+                        category=categorize_threat(threat_name),
+                        severity=classify_threat_severity_str(threat_name)
                     )
                     threat_details.append(threat_detail)
                     infected_count += 1

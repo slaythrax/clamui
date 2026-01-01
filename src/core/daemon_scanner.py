@@ -16,8 +16,12 @@ from typing import Callable, Optional
 from gi.repository import GLib
 
 from .log_manager import LogEntry, LogManager
-from .settings_manager import SettingsManager
 from .scanner import ScanResult, ScanStatus, ThreatDetail, glob_to_regex
+from .settings_manager import SettingsManager
+from .threat_classifier import (
+    categorize_threat,
+    classify_threat_severity_str,
+)
 from .utils import (
     check_clamdscan_installed,
     check_clamd_connection,
@@ -473,71 +477,6 @@ class DaemonScanner:
                 return True
         return False
 
-    def _classify_threat_severity(self, threat_name: str) -> str:
-        """Classify threat severity level."""
-        if not threat_name:
-            return "medium"
-
-        name_lower = threat_name.lower()
-
-        critical_patterns = ['ransom', 'rootkit', 'bootkit', 'cryptolocker', 'wannacry']
-        for pattern in critical_patterns:
-            if pattern in name_lower:
-                return "critical"
-
-        high_patterns = ['trojan', 'worm', 'backdoor', 'exploit', 'downloader', 'dropper', 'keylogger']
-        for pattern in high_patterns:
-            if pattern in name_lower:
-                return "high"
-
-        medium_patterns = ['adware', 'pua', 'pup', 'spyware', 'miner', 'coinminer']
-        for pattern in medium_patterns:
-            if pattern in name_lower:
-                return "medium"
-
-        low_patterns = ['eicar', 'test-signature', 'test.file', 'heuristic', 'generic']
-        for pattern in low_patterns:
-            if pattern in name_lower:
-                return "low"
-
-        return "medium"
-
-    def _categorize_threat(self, threat_name: str) -> str:
-        """Extract threat category from name."""
-        if not threat_name:
-            return "Unknown"
-
-        name_lower = threat_name.lower()
-
-        category_patterns = [
-            ('ransomware', 'Ransomware'),
-            ('ransom', 'Ransomware'),
-            ('rootkit', 'Rootkit'),
-            ('bootkit', 'Rootkit'),
-            ('trojan', 'Trojan'),
-            ('worm', 'Worm'),
-            ('backdoor', 'Backdoor'),
-            ('exploit', 'Exploit'),
-            ('adware', 'Adware'),
-            ('spyware', 'Spyware'),
-            ('keylogger', 'Spyware'),
-            ('pua', 'PUA'),
-            ('pup', 'PUA'),
-            ('eicar', 'Test'),
-            ('test-signature', 'Test'),
-            ('test.file', 'Test'),
-            ('virus', 'Virus'),
-            ('macro', 'Macro'),
-            ('phish', 'Phishing'),
-            ('heuristic', 'Heuristic'),
-        ]
-
-        for pattern, category in category_patterns:
-            if pattern in name_lower:
-                return category
-
-        return "Virus"
-
     def _parse_results(
         self,
         path: str,
@@ -588,8 +527,8 @@ class DaemonScanner:
                     threat_detail = ThreatDetail(
                         file_path=file_path,
                         threat_name=threat_name,
-                        category=self._categorize_threat(threat_name),
-                        severity=self._classify_threat_severity(threat_name)
+                        category=categorize_threat(threat_name),
+                        severity=classify_threat_severity_str(threat_name)
                     )
                     threat_details.append(threat_detail)
                     infected_count += 1

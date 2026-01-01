@@ -11,6 +11,7 @@ import pytest
 # and those methods are not tested here (unit tests mock the async behavior)
 from src.core.daemon_scanner import DaemonScanner
 from src.core.scanner import ScanResult, ScanStatus, ThreatDetail
+from src.core.threat_classifier import classify_threat_severity_str, categorize_threat
 
 
 @pytest.fixture
@@ -181,41 +182,31 @@ Infected files: 1
 
 
 class TestDaemonScannerThreatClassification:
-    """Tests for threat classification methods."""
+    """Tests for threat classification functions."""
 
-    def test_classify_threat_severity_critical(self, daemon_scanner_class):
+    def test_classify_threat_severity_critical(self):
         """Test classifying ransomware as critical."""
-        scanner = daemon_scanner_class()
-
-        severity = scanner._classify_threat_severity("Win.Ransomware.Locky")
+        severity = classify_threat_severity_str("Win.Ransomware.Locky")
         assert severity == "critical"
 
-    def test_classify_threat_severity_high(self, daemon_scanner_class):
+    def test_classify_threat_severity_high(self):
         """Test classifying trojan as high severity."""
-        scanner = daemon_scanner_class()
-
-        severity = scanner._classify_threat_severity("Win.Trojan.Agent")
+        severity = classify_threat_severity_str("Win.Trojan.Agent")
         assert severity == "high"
 
-    def test_classify_threat_severity_low(self, daemon_scanner_class):
+    def test_classify_threat_severity_low(self):
         """Test classifying EICAR test as low severity."""
-        scanner = daemon_scanner_class()
-
-        severity = scanner._classify_threat_severity("Eicar-Test-Signature")
+        severity = classify_threat_severity_str("Eicar-Test-Signature")
         assert severity == "low"
 
-    def test_categorize_threat_trojan(self, daemon_scanner_class):
+    def test_categorize_threat_trojan(self):
         """Test categorizing a trojan threat."""
-        scanner = daemon_scanner_class()
-
-        category = scanner._categorize_threat("Win.Trojan.Agent")
+        category = categorize_threat("Win.Trojan.Agent")
         assert category == "Trojan"
 
-    def test_categorize_threat_ransomware(self, daemon_scanner_class):
+    def test_categorize_threat_ransomware(self):
         """Test categorizing a ransomware threat."""
-        scanner = daemon_scanner_class()
-
-        category = scanner._categorize_threat("Win.Ransomware.Locky")
+        category = categorize_threat("Win.Ransomware.Locky")
         assert category == "Ransomware"
 
 
