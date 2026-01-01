@@ -148,8 +148,9 @@ def send_notification(
 
         # Add icon if available
         icon_paths = [
-            "/usr/share/icons/hicolor/scalable/apps/com.github.rooki.clamui.svg",
-            "/usr/share/icons/hicolor/48x48/apps/com.github.clamui.ClamUI.png",
+            "/app/share/icons/hicolor/scalable/apps/com.github.rooki.clamui.png",  # Flatpak
+            "/usr/share/icons/hicolor/scalable/apps/com.github.rooki.clamui.png",  # System
+            os.path.expanduser("~/.local/share/icons/hicolor/scalable/apps/com.github.rooki.clamui.png"),  # User
             "dialog-warning",  # Fallback system icon
         ]
         for icon in icon_paths:

@@ -20,6 +20,7 @@ import logging
 import os
 import sys
 import threading
+from pathlib import Path
 from typing import Dict, List, Optional
 
 # Configure logging to stderr (stdout is used for IPC)
@@ -62,6 +63,45 @@ except (ValueError, ImportError) as e:
 if not APPINDICATOR_AVAILABLE:
     print(json.dumps({"event": "error", "message": "No AppIndicator library available"}), flush=True)
     sys.exit(1)
+
+# Import tray icon generator (after GTK3 loads successfully)
+CUSTOM_ICONS_AVAILABLE = False
+TrayIconGenerator = None
+find_clamui_base_icon = None
+get_tray_icon_cache_dir = None
+
+# Try to import tray_icons - handles both module and standalone script execution
+# When running as a standalone script, we can't use relative imports and must
+# avoid importing src.ui (which loads GTK4 views and conflicts with GTK3)
+try:
+    try:
+        # Try relative import first (when run as a module)
+        from .tray_icons import (
+            TrayIconGenerator,
+            find_clamui_base_icon,
+            get_tray_icon_cache_dir,
+            is_available as icons_available,
+        )
+    except ImportError:
+        # Running as standalone script - import tray_icons directly from same directory
+        # to avoid triggering src/ui/__init__.py which imports GTK4 views
+        import importlib.util
+        tray_icons_path = Path(__file__).parent / "tray_icons.py"
+        spec = importlib.util.spec_from_file_location("tray_icons", tray_icons_path)
+        tray_icons_module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(tray_icons_module)
+        TrayIconGenerator = tray_icons_module.TrayIconGenerator
+        find_clamui_base_icon = tray_icons_module.find_clamui_base_icon
+        get_tray_icon_cache_dir = tray_icons_module.get_tray_icon_cache_dir
+        icons_available = tray_icons_module.is_available
+
+    CUSTOM_ICONS_AVAILABLE = icons_available()
+    if CUSTOM_ICONS_AVAILABLE:
+        logger.info("Custom tray icon generation available")
+    else:
+        logger.info("Custom tray icons not available (PIL or base icon missing)")
+except Exception as e:
+    logger.warning(f"Could not import tray_icons module: {e}")
 
 
 class TrayService:
@@ -127,8 +167,42 @@ class TrayService:
         self._profiles_menu_item: Optional[Gtk3.MenuItem] = None
         self._current_profile_id: Optional[str] = None
 
+        # Custom icon generator
+        self._icon_generator: Optional[TrayIconGenerator] = None
+        self._icon_cache_dir: Optional[str] = None
+        self._using_custom_icons = False
+
+        # Set up custom icons if available
+        self._setup_custom_icons()
+
         # Create indicator
         self._create_indicator()
+
+    def _setup_custom_icons(self) -> None:
+        """Set up custom ClamUI icon generation."""
+        if not CUSTOM_ICONS_AVAILABLE:
+            logger.debug("Custom icons not available, using theme icons")
+            return
+
+        base_icon = find_clamui_base_icon()
+        if not base_icon:
+            logger.info("ClamUI base icon not found, using theme icons")
+            return
+
+        try:
+            self._icon_cache_dir = get_tray_icon_cache_dir()
+            self._icon_generator = TrayIconGenerator(base_icon, self._icon_cache_dir)
+
+            # Pre-generate all status icons for responsiveness
+            self._icon_generator.pregenerate_all()
+
+            self._using_custom_icons = True
+            logger.info(f"Custom tray icons enabled")
+            logger.info(f"  Icon dir: {self._icon_cache_dir}")
+        except Exception as e:
+            logger.warning(f"Failed to set up custom icons: {e}, using theme icons")
+            self._using_custom_icons = False
+            self._icon_generator = None
 
     def _get_icon_theme(self) -> Gtk3.IconTheme:
         """Get the current GTK icon theme."""
@@ -157,13 +231,32 @@ class TrayService:
 
     def _create_indicator(self) -> None:
         """Create and configure the AppIndicator instance."""
-        initial_icon = self._resolve_icon(self._current_status)
+        if self._using_custom_icons and self._icon_generator:
+            # Use custom generated icon with ClamUI logo
+            # Generate the icon first to ensure it exists
+            icon_path = self._icon_generator.get_icon_path(self._current_status)
+            icon_name = self._icon_generator.get_icon_name(self._current_status)
 
-        self._indicator = AppIndicator.Indicator.new(
-            self.INDICATOR_ID,
-            initial_icon,
-            AppIndicator.IndicatorCategory.APPLICATION_STATUS,
-        )
+            # Create indicator with the custom icon
+            # Icons are in ~/.local/share/icons/hicolor/ which is in GTK3's search path
+            self._indicator = AppIndicator.Indicator.new(
+                self.INDICATOR_ID,
+                icon_name,  # GTK3 will find this in XDG icon directories
+                AppIndicator.IndicatorCategory.APPLICATION_STATUS,
+            )
+
+            logger.info(f"Tray indicator created with custom icon: {icon_name}")
+            logger.info(f"  Icon file: {icon_path}")
+        else:
+            # Fall back to theme icons
+            initial_icon = self._resolve_icon(self._current_status)
+
+            self._indicator = AppIndicator.Indicator.new(
+                self.INDICATOR_ID,
+                initial_icon,
+                AppIndicator.IndicatorCategory.APPLICATION_STATUS,
+            )
+            logger.info(f"Tray indicator created with theme icon: {initial_icon}")
 
         # Build menu
         self._menu = self._build_menu()
@@ -174,8 +267,6 @@ class TrayService:
 
         # Activate to show icon
         self._indicator.set_status(AppIndicator.IndicatorStatus.ACTIVE)
-
-        logger.info(f"Tray indicator created with icon: {initial_icon}")
 
     def _build_menu(self) -> Gtk3.Menu:
         """Build the GTK3 context menu."""
@@ -312,10 +403,18 @@ class TrayService:
             logger.warning(f"Unknown status '{status}', using 'protected'")
             status = "protected"
 
-        icon_name = self._resolve_icon(status)
         tooltip = f"ClamUI - {status.capitalize()}"
 
-        self._indicator.set_icon_full(icon_name, tooltip)
+        if self._using_custom_icons and self._icon_generator:
+            # Use custom generated icon with ClamUI logo
+            self._icon_generator.get_icon_path(status)  # Ensure icon exists
+            icon_name = self._icon_generator.get_icon_name(status)
+            self._indicator.set_icon_full(icon_name, tooltip)
+        else:
+            # Fall back to theme icons
+            icon_name = self._resolve_icon(status)
+            self._indicator.set_icon_full(icon_name, tooltip)
+
         self._current_status = status
         logger.debug(f"Status updated to: {status}")
 

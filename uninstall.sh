@@ -167,7 +167,7 @@ remove_xdg_files() {
     FILES_REMOVED=0
 
     # Remove desktop entry
-    DESKTOP_FILE="$DESKTOP_DIR/com.github.clamui.desktop"
+    DESKTOP_FILE="$DESKTOP_DIR/com.github.rooki.clamui.desktop"
     if [ -f "$DESKTOP_FILE" ]; then
         log_info "Removing desktop entry..."
         rm -f "$DESKTOP_FILE"
@@ -177,19 +177,29 @@ remove_xdg_files() {
         log_info "Desktop entry not found: $DESKTOP_FILE"
     fi
 
-    # Remove application icon
-    ICON_FILE="$ICON_DIR/com.github.clamui.svg"
-    if [ -f "$ICON_FILE" ]; then
-        log_info "Removing application icon..."
-        rm -f "$ICON_FILE"
-        log_success "Removed: $ICON_FILE"
+    # Remove application icons (SVG and PNG)
+    SVG_ICON_FILE="$ICON_DIR/com.github.rooki.clamui.svg"
+    if [ -f "$SVG_ICON_FILE" ]; then
+        log_info "Removing SVG icon..."
+        rm -f "$SVG_ICON_FILE"
+        log_success "Removed: $SVG_ICON_FILE"
         FILES_REMOVED=$((FILES_REMOVED + 1))
     else
-        log_info "Icon not found: $ICON_FILE"
+        log_info "SVG icon not found: $SVG_ICON_FILE"
+    fi
+
+    PNG_ICON_FILE="$ICON_DIR/com.github.rooki.clamui.png"
+    if [ -f "$PNG_ICON_FILE" ]; then
+        log_info "Removing PNG icon..."
+        rm -f "$PNG_ICON_FILE"
+        log_success "Removed: $PNG_ICON_FILE"
+        FILES_REMOVED=$((FILES_REMOVED + 1))
+    else
+        log_info "PNG icon not found: $PNG_ICON_FILE"
     fi
 
     # Remove Nemo file manager action
-    NEMO_FILE="$NEMO_ACTION_DIR/com.github.clamui.nemo_action"
+    NEMO_FILE="$NEMO_ACTION_DIR/com.github.rooki.clamui.nemo_action"
     if [ -f "$NEMO_FILE" ]; then
         log_info "Removing Nemo action..."
         rm -f "$NEMO_FILE"
