@@ -629,73 +629,404 @@ ls -la ~/.local/share/icons/hicolor/scalable/apps/com.github.rooki.clamui.*
 
 ### Context menu not appearing
 
-**Symptoms**: "Scan with ClamUI" option missing in right-click menu
+**Symptoms**:
+- "Scan with ClamUI" option missing when right-clicking files/folders
+- Context menu shows other applications but not ClamUI
+- Desktop file exists but integration doesn't work
 
-**Solution**: Varies by file manager
+**Cause**: Missing desktop file, outdated desktop database, or file manager-specific configuration issues
+
+**Diagnostic steps**:
+
+```bash
+# 1. Check if desktop file exists
+ls -la ~/.local/share/applications/com.github.rooki.clamui.desktop
+
+# 2. Verify desktop file content
+cat ~/.local/share/applications/com.github.rooki.clamui.desktop | grep -E "Actions|ScanFile"
+
+# 3. Check if clamui command is accessible
+which clamui
+clamui --version
+
+# 4. Check your file manager
+ps aux | grep -E "nautilus|dolphin|nemo|thunar|pcmanfm"
+```
+
+**File manager-specific solutions**:
 
 **Nautilus (GNOME Files)**:
+
+Context menu integration works via Desktop Actions in the `.desktop` file.
+
 ```bash
-# Ensure desktop file exists
-ls ~/.local/share/applications/com.github.rooki.ClamUI.desktop
+# Verify desktop file exists
+ls ~/.local/share/applications/com.github.rooki.clamui.desktop
+
+# Check if it has the Actions entry
+grep "Actions=ScanFile" ~/.local/share/applications/com.github.rooki.clamui.desktop
 
 # Update desktop database
 update-desktop-database ~/.local/share/applications
 
-# Restart Nautilus
+# Clear cache and restart Nautilus
+rm -rf ~/.cache/nautilus
 nautilus -q
+sleep 2
+nautilus &
 ```
 
 **Dolphin (KDE)**:
+
+Dolphin uses the same Desktop Actions mechanism as Nautilus.
+
 ```bash
-# Same as Nautilus
+# Update desktop database
 update-desktop-database ~/.local/share/applications
+
+# Restart Dolphin completely
 killall dolphin
+kbuildsycoca5  # KDE 5
+# or
+kbuildsycoca6  # KDE 6
+
+# Start Dolphin
+dolphin &
 ```
 
 **Nemo (Cinnamon)**:
+
+Nemo supports both Desktop Actions and Nemo-specific action files.
+
 ```bash
-# Check Nemo action file
-ls ~/.local/share/nemo/actions/com.github.rooki.ClamUI.nemo_action
+# Check for Nemo action file (preferred method)
+ls ~/.local/share/nemo/actions/com.github.rooki.clamui.nemo_action
+
+# If missing, check desktop file fallback
+ls ~/.local/share/applications/com.github.rooki.clamui.desktop
+
+# Update desktop database
+update-desktop-database ~/.local/share/applications
 
 # Restart Nemo
 nemo -q
+sleep 2
+nemo &
+```
+
+**Thunar (XFCE)**:
+
+Thunar uses custom actions in its settings.
+
+```bash
+# Verify desktop file exists
+ls ~/.local/share/applications/com.github.rooki.clamui.desktop
+
+# Update desktop database
+update-desktop-database ~/.local/share/applications
+
+# Restart Thunar
+thunar -q
+sleep 1
+thunar &
+```
+
+**PCManFM (LXDE/LXQt)**:
+
+PCManFM uses Desktop Actions like Nautilus.
+
+```bash
+# Update desktop database
+update-desktop-database ~/.local/share/applications
+
+# Restart PCManFM
+pkill pcmanfm
+pcmanfm &
+```
+
+**Caja (MATE)**:
+
+Caja uses Desktop Actions similar to Nautilus.
+
+```bash
+# Update desktop database
+update-desktop-database ~/.local/share/applications
+
+# Restart Caja
+caja -q
+sleep 1
+caja &
 ```
 
 ### Desktop file permissions
 
-**Symptoms**: Desktop file exists but context menu doesn't work
+**Symptoms**:
+- Desktop file exists but context menu doesn't appear
+- File manager shows errors when trying to use context menu
+- ClamUI doesn't launch when clicked from context menu
 
-**Solution**: Ensure the desktop file is executable
+**Cause**: Desktop file lacks executable permissions or has incorrect ownership
+
+**Solution**: Fix permissions and ownership
 
 ```bash
-chmod +x ~/.local/share/applications/com.github.rooki.ClamUI.desktop
+# Check current permissions
+ls -la ~/.local/share/applications/com.github.rooki.clamui.desktop
+
+# The file should be readable (doesn't need to be executable for context menu)
+# Set correct permissions
+chmod 644 ~/.local/share/applications/com.github.rooki.clamui.desktop
+
+# Verify ownership
+stat ~/.local/share/applications/com.github.rooki.clamui.desktop
+
+# Ensure it's owned by your user
+sudo chown $USER:$USER ~/.local/share/applications/com.github.rooki.clamui.desktop
+```
+
+**Validate desktop file content**:
+
+```bash
+# Check for syntax errors
+desktop-file-validate ~/.local/share/applications/com.github.rooki.clamui.desktop
+
+# Verify it has required entries
+grep -E "^Type=|^Name=|^Exec=|^Actions=|^\[Desktop Action" ~/.local/share/applications/com.github.rooki.clamui.desktop
+```
+
+**Expected output** should include:
+```
+Type=Application
+Name=ClamUI
+Exec=clamui
+Actions=ScanFile
+[Desktop Action ScanFile]
 ```
 
 ### Manual context menu installation
 
-**Symptoms**: Flatpak installation didn't set up context menu
+**Symptoms**:
+- Fresh installation but context menu not working
+- Flatpak installation missing context menu integration
+- Desktop file not installed automatically
 
-**Solution**: Manually export the desktop file
+**Solution**: Manually install desktop file and related components
+
+**For native installation**:
 
 ```bash
-# For Flatpak installations
-flatpak run --command=sh com.github.rooki.ClamUI -c \
-  "cp /app/share/applications/com.github.rooki.ClamUI.desktop ~/.local/share/applications/"
+# Navigate to ClamUI source directory
+cd /path/to/clamui
 
+# Copy desktop file
+mkdir -p ~/.local/share/applications
+cp com.github.rooki.clamui.desktop ~/.local/share/applications/
+
+# Copy Nemo action file (for Cinnamon users)
+mkdir -p ~/.local/share/nemo/actions
+cp com.github.rooki.clamui.nemo_action ~/.local/share/nemo/actions/
+
+# Copy application icons
+mkdir -p ~/.local/share/icons/hicolor/scalable/apps
+cp icons/com.github.rooki.clamui.svg ~/.local/share/icons/hicolor/scalable/apps/
+
+# Update desktop database
 update-desktop-database ~/.local/share/applications
+
+# Update icon cache
+gtk-update-icon-cache -f ~/.local/share/icons/hicolor/
+
+# Verify installation
+ls -la ~/.local/share/applications/com.github.rooki.clamui.desktop
+```
+
+**For Flatpak installation**:
+
+```bash
+# Export desktop file from Flatpak
+mkdir -p ~/.local/share/applications
+flatpak run --command=sh com.github.rooki.ClamUI -c \
+  "cat /app/share/applications/com.github.rooki.clamui.desktop" \
+  > ~/.local/share/applications/com.github.rooki.clamui.desktop
+
+# For Nemo users, export Nemo action
+mkdir -p ~/.local/share/nemo/actions
+flatpak run --command=sh com.github.rooki.ClamUI -c \
+  "cat /app/share/nemo/actions/com.github.rooki.clamui.nemo_action" \
+  > ~/.local/share/nemo/actions/com.github.rooki.clamui.nemo_action
+
+# Update desktop file to use Flatpak command
+sed -i 's|Exec=clamui|Exec=flatpak run com.github.rooki.ClamUI|g' \
+  ~/.local/share/applications/com.github.rooki.clamui.desktop
+
+# Also update the Desktop Action
+sed -i 's|Exec=clamui %F|Exec=flatpak run com.github.rooki.ClamUI %F|g' \
+  ~/.local/share/applications/com.github.rooki.clamui.desktop
+
+# Update desktop database
+update-desktop-database ~/.local/share/applications
+
+# Verify the Exec line uses flatpak
+grep "^Exec=" ~/.local/share/applications/com.github.rooki.clamui.desktop
+```
+
+**Verify integration works**:
+
+```bash
+# Test launching ClamUI from command line
+clamui  # Native installation
+# or
+flatpak run com.github.rooki.ClamUI  # Flatpak
+
+# Test with a file argument (simulates context menu click)
+clamui ~/Documents  # Native
+# or
+flatpak run com.github.rooki.ClamUI ~/Documents  # Flatpak
 ```
 
 ### File manager refresh requirements
 
-**Symptoms**: Context menu appears but doesn't work correctly
+**Symptoms**:
+- Desktop file installed correctly but context menu still not appearing
+- Context menu appears but shows outdated information
+- Changes to desktop file not reflected in file manager
+- ClamUI launches with wrong arguments when clicked from context menu
 
-**Solution**: Completely restart your desktop session
+**Cause**: File managers cache desktop file information and don't detect changes immediately
+
+**Solution**: Force refresh of desktop integration
+
+**Method 1: Update desktop database and restart file manager**
 
 ```bash
-# Log out and log back in, or restart file manager
-nautilus -q && nautilus &  # GNOME
-killall dolphin && dolphin &  # KDE
-nemo -q && nemo &  # Cinnamon
+# Update desktop database
+update-desktop-database ~/.local/share/applications
+
+# Restart your file manager (choose one)
+nautilus -q && nautilus &          # GNOME Files
+killall dolphin && dolphin &       # KDE Dolphin
+nemo -q && nemo &                  # Cinnamon Nemo
+thunar -q && thunar &               # XFCE Thunar
+caja -q && caja &                   # MATE Caja
+pkill pcmanfm && pcmanfm &          # LXDE PCManFM
+```
+
+**Method 2: Restart desktop session** (most reliable)
+
+```bash
+# Log out and log back in
+# or restart GNOME Shell (GNOME only)
+# Press Alt+F2, type 'r', press Enter
+
+# For GNOME on X11 (not Wayland)
+killall -3 gnome-shell
+
+# For KDE Plasma
+kquitapp5 plasmashell && kstart5 plasmashell  # KDE 5
+# or
+kquitapp6 plasmashell && kstart plasmashell   # KDE 6
+```
+
+**Method 3: Clear file manager cache**
+
+```bash
+# Nautilus cache
+rm -rf ~/.cache/nautilus
+nautilus -q
+
+# Dolphin cache
+rm -rf ~/.cache/dolphin
+rm -rf ~/.local/share/kservices5/ServiceMenus/*.desktop  # Old KDE cache
+killall dolphin
+
+# Nemo cache
+rm -rf ~/.cache/nemo
+nemo -q
+
+# General desktop cache
+rm -rf ~/.cache/desktop-file-*
+```
+
+**Method 4: Force desktop database rebuild**
+
+```bash
+# Remove and rebuild desktop database cache
+rm ~/.local/share/applications/mimeinfo.cache
+update-desktop-database ~/.local/share/applications
+
+# Update MIME type associations
+update-mime-database ~/.local/share/mime
+
+# Update icon cache
+gtk-update-icon-cache -f ~/.local/share/icons/hicolor/
+```
+
+**Verification checklist**:
+
+After refreshing, verify the integration works:
+
+```bash
+# 1. Check desktop database was updated
+ls -la ~/.local/share/applications/mimeinfo.cache
+
+# 2. Verify desktop file is recognized
+grep -r "clamui" ~/.local/share/applications/
+
+# 3. Check if file manager process is running
+ps aux | grep -E "nautilus|dolphin|nemo" | grep -v grep
+
+# 4. Test context menu
+# Right-click a file or folder in your file manager
+# Look for "Scan with ClamUI" option
+```
+
+**Troubleshooting specific issues**:
+
+**Issue**: Context menu appears on some files but not others
+
+**Solution**: Check file type associations and Desktop Action configuration
+
+```bash
+# Verify the Desktop Action accepts all file types
+grep -A 3 "\[Desktop Action ScanFile\]" ~/.local/share/applications/com.github.rooki.clamui.desktop
+
+# Should show:
+# [Desktop Action ScanFile]
+# Name=Scan with ClamUI
+# Exec=clamui %F
+```
+
+**Issue**: Context menu appears but clicking does nothing
+
+**Solution**: Check ClamUI executable path and test manually
+
+```bash
+# Verify clamui is in PATH
+which clamui
+
+# Test execution with a file argument
+clamui ~/Documents
+
+# Check for errors in logs
+journalctl --user -u clamui --since "1 minute ago"
+```
+
+**Issue**: Context menu works for native install but not Flatpak
+
+**Solution**: Ensure desktop file uses correct Flatpak command
+
+```bash
+# Check Exec line in desktop file
+grep "Exec=" ~/.local/share/applications/com.github.rooki.clamui.desktop
+
+# Should contain:
+# Exec=flatpak run com.github.rooki.ClamUI
+# Exec=flatpak run com.github.rooki.ClamUI %F  (in Desktop Action section)
+
+# If not, update it
+sed -i 's|Exec=clamui|Exec=flatpak run com.github.rooki.ClamUI|g' \
+  ~/.local/share/applications/com.github.rooki.clamui.desktop
+update-desktop-database ~/.local/share/applications
 ```
 
 ---
