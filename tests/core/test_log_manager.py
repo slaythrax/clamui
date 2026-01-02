@@ -3133,3 +3133,467 @@ class TestLogManagerOptimizedGetLogCount:
 
         # Count should be 0
         assert manager.get_log_count() == 0
+
+
+class TestLogManagerMigrationIntegration:
+    """Integration tests for migration from non-indexed to indexed state.
+
+    These tests verify that the auto-migration feature works correctly in
+    end-to-end scenarios and doesn't break any existing functionality.
+    """
+
+    @pytest.fixture
+    def temp_log_dir(self):
+        """Create a temporary directory for log storage."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            yield tmpdir
+
+    def _create_manual_log_files(self, log_dir, count=5):
+        """Helper to create log files manually without using save_log().
+
+        This simulates an old installation where logs exist but no index.
+        Returns list of created LogEntry objects.
+        """
+        log_path = Path(log_dir)
+        log_path.mkdir(parents=True, exist_ok=True)
+
+        entries = []
+        for i in range(count):
+            entry = LogEntry.create(
+                log_type="scan" if i % 2 == 0 else "update",
+                status="clean" if i % 3 != 0 else "infected",
+                summary=f"Entry {i}",
+                details=f"Details for entry {i}",
+                path=f"/test/path/{i}",
+                duration=float(i * 10),
+            )
+            entries.append(entry)
+
+            # Write directly to file (bypassing save_log to avoid index creation)
+            log_file = log_path / f"{entry.id}.json"
+            with open(log_file, "w", encoding="utf-8") as f:
+                json.dump(entry.to_dict(), f, indent=2)
+
+        return entries
+
+    def test_migration_transparent_workflow(self, temp_log_dir):
+        """Test complete workflow: manual logs -> migrate -> continue operations."""
+        # Step 1: Create logs manually (simulating old installation)
+        entries = self._create_manual_log_files(temp_log_dir, count=5)
+
+        # Verify no index exists
+        index_path = Path(temp_log_dir) / "log_index.json"
+        assert not index_path.exists()
+
+        # Step 2: Create LogManager (triggers migration on first get_logs)
+        manager = LogManager(log_dir=temp_log_dir)
+
+        # Step 3: Retrieve logs (should trigger migration)
+        logs = manager.get_logs()
+
+        # Verify migration happened
+        assert index_path.exists()
+        assert len(logs) == 5
+
+        # Step 4: Continue using manager normally - save new log
+        new_entry = LogEntry.create(
+            log_type="scan",
+            status="clean",
+            summary="New entry after migration",
+            details="This entry was created after migration",
+        )
+        result = manager.save_log(new_entry)
+        assert result is True
+
+        # Step 5: Verify index was updated
+        with open(index_path, "r", encoding="utf-8") as f:
+            index_data = json.load(f)
+        assert len(index_data["entries"]) == 6
+
+        # Step 6: Retrieve logs again (should use index)
+        logs_after = manager.get_logs()
+        assert len(logs_after) == 6
+
+        # Step 7: Delete a log
+        result = manager.delete_log(entries[0].id)
+        assert result is True
+
+        # Step 8: Verify index was updated
+        with open(index_path, "r", encoding="utf-8") as f:
+            index_data = json.load(f)
+        assert len(index_data["entries"]) == 5
+
+        # Step 9: Verify get_logs returns correct count
+        logs_final = manager.get_logs()
+        assert len(logs_final) == 5
+        assert all(log.id != entries[0].id for log in logs_final)
+
+    def test_migration_with_type_filtering(self, temp_log_dir):
+        """Test that type filtering works correctly after migration."""
+        # Create manual logs with mixed types
+        entries = self._create_manual_log_files(temp_log_dir, count=10)
+
+        # Create LogManager and trigger migration
+        manager = LogManager(log_dir=temp_log_dir)
+
+        # Test filtering by scan type
+        scan_logs = manager.get_logs(log_type="scan")
+        assert len(scan_logs) == 5  # Half are scans (even indices)
+        assert all(log.type == "scan" for log in scan_logs)
+
+        # Test filtering by update type
+        update_logs = manager.get_logs(log_type="update")
+        assert len(update_logs) == 5  # Half are updates (odd indices)
+        assert all(log.type == "update" for log in update_logs)
+
+        # Test with no filter
+        all_logs = manager.get_logs()
+        assert len(all_logs) == 10
+
+    def test_migration_with_limit_application(self, temp_log_dir):
+        """Test that limit parameter works correctly after migration."""
+        # Create manual logs
+        entries = self._create_manual_log_files(temp_log_dir, count=20)
+
+        # Create LogManager and trigger migration
+        manager = LogManager(log_dir=temp_log_dir)
+
+        # Test various limits
+        logs_5 = manager.get_logs(limit=5)
+        assert len(logs_5) == 5
+
+        logs_10 = manager.get_logs(limit=10)
+        assert len(logs_10) == 10
+
+        logs_all = manager.get_logs(limit=100)
+        assert len(logs_all) == 20
+
+        # Verify sort order (newest first)
+        timestamps = [log.timestamp for log in logs_5]
+        assert timestamps == sorted(timestamps, reverse=True)
+
+    def test_migration_combined_filters(self, temp_log_dir):
+        """Test that type filtering and limit work together after migration."""
+        # Create manual logs
+        entries = self._create_manual_log_files(temp_log_dir, count=20)
+
+        # Create LogManager and trigger migration
+        manager = LogManager(log_dir=temp_log_dir)
+
+        # Test combined filters
+        scan_logs = manager.get_logs(log_type="scan", limit=3)
+        assert len(scan_logs) == 3
+        assert all(log.type == "scan" for log in scan_logs)
+
+        # Verify newest scans are returned
+        timestamps = [log.timestamp for log in scan_logs]
+        assert timestamps == sorted(timestamps, reverse=True)
+
+    def test_migration_get_log_count_consistency(self, temp_log_dir):
+        """Test that get_log_count() returns correct count after migration."""
+        # Create manual logs
+        entries = self._create_manual_log_files(temp_log_dir, count=7)
+
+        # Create LogManager and trigger migration
+        manager = LogManager(log_dir=temp_log_dir)
+
+        # Trigger migration by calling get_logs
+        logs = manager.get_logs()
+
+        # Verify get_log_count uses the index
+        count = manager.get_log_count()
+        assert count == 7
+        assert count == len(logs)
+
+    def test_migration_clear_logs_workflow(self, temp_log_dir):
+        """Test that clear_logs() works correctly after migration."""
+        # Create manual logs
+        entries = self._create_manual_log_files(temp_log_dir, count=5)
+
+        # Create LogManager and trigger migration
+        manager = LogManager(log_dir=temp_log_dir)
+        logs = manager.get_logs()
+        assert len(logs) == 5
+
+        # Clear all logs
+        result = manager.clear_logs()
+        assert result is True
+
+        # Verify index was reset
+        index_path = Path(temp_log_dir) / "log_index.json"
+        assert index_path.exists()
+
+        with open(index_path, "r", encoding="utf-8") as f:
+            index_data = json.load(f)
+        assert len(index_data["entries"]) == 0
+
+        # Verify get_logs returns empty
+        logs_after = manager.get_logs()
+        assert len(logs_after) == 0
+
+        # Verify get_log_count returns 0
+        assert manager.get_log_count() == 0
+
+    def test_migration_multiple_manager_instances(self, temp_log_dir):
+        """Test that multiple LogManager instances work correctly after migration."""
+        # Create manual logs
+        entries = self._create_manual_log_files(temp_log_dir, count=5)
+
+        # Create first manager and trigger migration
+        manager1 = LogManager(log_dir=temp_log_dir)
+        logs1 = manager1.get_logs()
+        assert len(logs1) == 5
+
+        # Verify index exists
+        index_path = Path(temp_log_dir) / "log_index.json"
+        assert index_path.exists()
+
+        # Create second manager (should use existing index)
+        manager2 = LogManager(log_dir=temp_log_dir)
+        logs2 = manager2.get_logs()
+        assert len(logs2) == 5
+
+        # Add log via first manager
+        new_entry = LogEntry.create(
+            log_type="scan",
+            status="clean",
+            summary="Entry from manager1",
+            details="Details",
+        )
+        manager1.save_log(new_entry)
+
+        # Create third manager (should see updated index)
+        manager3 = LogManager(log_dir=temp_log_dir)
+        logs3 = manager3.get_logs()
+        assert len(logs3) == 6
+
+    def test_migration_concurrent_operations(self, temp_log_dir):
+        """Test that concurrent operations work correctly during/after migration."""
+        # Create manual logs
+        entries = self._create_manual_log_files(temp_log_dir, count=10)
+
+        # Create LogManager and trigger migration
+        manager = LogManager(log_dir=temp_log_dir)
+
+        results = []
+        errors = []
+
+        def save_logs():
+            try:
+                for i in range(5):
+                    entry = LogEntry.create(
+                        log_type="scan",
+                        status="clean",
+                        summary=f"Concurrent save {i}",
+                        details=f"Details {i}",
+                    )
+                    result = manager.save_log(entry)
+                    results.append(result)
+            except Exception as e:
+                errors.append(e)
+
+        def read_logs():
+            try:
+                for i in range(5):
+                    logs = manager.get_logs()
+                    results.append(len(logs) >= 10)  # Should have at least original logs
+            except Exception as e:
+                errors.append(e)
+
+        # Run concurrent operations
+        threads = [
+            threading.Thread(target=save_logs),
+            threading.Thread(target=read_logs),
+            threading.Thread(target=save_logs),
+        ]
+
+        for thread in threads:
+            thread.start()
+
+        for thread in threads:
+            thread.join()
+
+        # Verify no errors occurred
+        assert len(errors) == 0
+
+        # Verify all operations succeeded
+        assert all(results)
+
+        # Verify final count is correct (10 original + 10 concurrent saves)
+        final_logs = manager.get_logs()
+        assert len(final_logs) == 20
+
+    def test_migration_delete_and_recreate_index(self, temp_log_dir):
+        """Test that system recovers if index is manually deleted after migration."""
+        # Create manual logs
+        entries = self._create_manual_log_files(temp_log_dir, count=5)
+
+        # Create LogManager and trigger migration
+        manager = LogManager(log_dir=temp_log_dir)
+        logs = manager.get_logs()
+        assert len(logs) == 5
+
+        # Verify index exists
+        index_path = Path(temp_log_dir) / "log_index.json"
+        assert index_path.exists()
+
+        # Manually delete index (simulating corruption or manual deletion)
+        index_path.unlink()
+        assert not index_path.exists()
+
+        # Create new LogManager instance
+        manager2 = LogManager(log_dir=temp_log_dir)
+
+        # get_logs should still work (fallback or validation triggers rebuild)
+        logs2 = manager2.get_logs()
+        assert len(logs2) == 5
+
+        # Index should be recreated automatically (via validation)
+        # Note: The first manager instance won't trigger migration again (flag is set)
+        # but the validation logic should detect the missing/invalid index
+
+    def test_migration_preserves_log_data_integrity(self, temp_log_dir):
+        """Test that migration preserves all log data correctly."""
+        # Create manual logs with diverse data
+        entries = self._create_manual_log_files(temp_log_dir, count=5)
+
+        # Create LogManager and trigger migration
+        manager = LogManager(log_dir=temp_log_dir)
+        logs = manager.get_logs()
+
+        # Verify all data is preserved
+        assert len(logs) == 5
+
+        # Create mapping for easy lookup
+        original_by_id = {e.id: e for e in entries}
+        retrieved_by_id = {log.id: log for log in logs}
+
+        # Verify all IDs match
+        assert set(original_by_id.keys()) == set(retrieved_by_id.keys())
+
+        # Verify all fields are preserved for each log
+        for log_id, original in original_by_id.items():
+            retrieved = retrieved_by_id[log_id]
+            assert retrieved.id == original.id
+            assert retrieved.timestamp == original.timestamp
+            assert retrieved.type == original.type
+            assert retrieved.status == original.status
+            assert retrieved.summary == original.summary
+            assert retrieved.details == original.details
+            assert retrieved.path == original.path
+            assert retrieved.duration == original.duration
+
+    def test_migration_with_corrupted_and_valid_logs(self, temp_log_dir):
+        """Test migration skips corrupted logs but processes valid ones."""
+        # Create some valid logs manually
+        valid_entries = self._create_manual_log_files(temp_log_dir, count=3)
+
+        # Add corrupted log files
+        log_path = Path(temp_log_dir)
+        corrupted1 = log_path / "corrupted1.json"
+        with open(corrupted1, "w", encoding="utf-8") as f:
+            f.write("{ invalid json")
+
+        corrupted2 = log_path / "corrupted2.json"
+        with open(corrupted2, "w", encoding="utf-8") as f:
+            json.dump({"id": "missing-fields"}, f)  # Missing required fields
+
+        # Create LogManager and trigger migration
+        manager = LogManager(log_dir=temp_log_dir)
+        logs = manager.get_logs()
+
+        # Should retrieve only valid logs
+        assert len(logs) == 3
+
+        # Verify all retrieved logs are from the valid set
+        valid_ids = {e.id for e in valid_entries}
+        retrieved_ids = {log.id for log in logs}
+        assert retrieved_ids == valid_ids
+
+    def test_migration_empty_directory_then_add_logs(self, temp_log_dir):
+        """Test migration behavior when starting with empty directory."""
+        # Create LogManager with empty directory
+        manager = LogManager(log_dir=temp_log_dir)
+
+        # First get_logs on empty directory
+        logs = manager.get_logs()
+        assert len(logs) == 0
+
+        # No index should be created for empty directory
+        index_path = Path(temp_log_dir) / "log_index.json"
+        # Note: The index might not exist if no logs were ever saved
+
+        # Now add logs normally
+        for i in range(5):
+            entry = LogEntry.create(
+                log_type="scan",
+                status="clean",
+                summary=f"Entry {i}",
+                details=f"Details {i}",
+            )
+            manager.save_log(entry)
+
+        # Index should now exist and be maintained
+        assert index_path.exists()
+
+        # Verify all logs are retrievable
+        logs_after = manager.get_logs()
+        assert len(logs_after) == 5
+
+    def test_migration_large_log_collection(self, temp_log_dir):
+        """Test migration with a large collection of logs (performance test)."""
+        # Create many logs manually
+        entries = self._create_manual_log_files(temp_log_dir, count=100)
+
+        # Create LogManager and trigger migration
+        manager = LogManager(log_dir=temp_log_dir)
+
+        # Migration should complete successfully
+        logs = manager.get_logs(limit=10)
+        assert len(logs) == 10
+
+        # Verify index exists and contains all entries
+        index_path = Path(temp_log_dir) / "log_index.json"
+        assert index_path.exists()
+
+        with open(index_path, "r", encoding="utf-8") as f:
+            index_data = json.load(f)
+        assert len(index_data["entries"]) == 100
+
+        # Verify get_log_count is efficient (uses index)
+        count = manager.get_log_count()
+        assert count == 100
+
+        # Verify filtering still works efficiently
+        scan_logs = manager.get_logs(log_type="scan", limit=5)
+        assert len(scan_logs) == 5
+        assert all(log.type == "scan" for log in scan_logs)
+
+    def test_migration_rebuild_index_method_still_works(self, temp_log_dir):
+        """Test that rebuild_index() can be called manually after migration."""
+        # Create manual logs
+        entries = self._create_manual_log_files(temp_log_dir, count=5)
+
+        # Create LogManager and trigger migration
+        manager = LogManager(log_dir=temp_log_dir)
+        logs = manager.get_logs()
+        assert len(logs) == 5
+
+        # Verify index exists
+        index_path = Path(temp_log_dir) / "log_index.json"
+        assert index_path.exists()
+
+        # Manually rebuild index
+        result = manager.rebuild_index()
+        assert result is True
+
+        # Verify index still exists and is correct
+        assert index_path.exists()
+
+        with open(index_path, "r", encoding="utf-8") as f:
+            index_data = json.load(f)
+        assert len(index_data["entries"]) == 5
+
+        # Verify logs are still retrievable
+        logs_after = manager.get_logs()
+        assert len(logs_after) == 5
