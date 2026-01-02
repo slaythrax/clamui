@@ -12,7 +12,51 @@ This document explains the architecture, IPC protocol, and threading model.
 
 **Solution**: Run the tray indicator in a separate Python subprocess with its own GTK3 instance, communicating with the main GTK4 application via JSON messages over stdin/stdout pipes.
 
-## Architecture Diagram
+## Component Relationships
+
+The system tray feature is split across four key files, organized by process boundary and GTK version:
+
+```mermaid
+graph LR
+    subgraph "Main Process - GTK4 Context"
+        App[app.py<br/>ClamUIApp<br/><b>GTK4/Adwaita</b>]
+        TrayMgr[tray_manager.py<br/>TrayManager<br/><b>GTK4</b>]
+
+        App -->|imports & creates| TrayMgr
+    end
+
+    subgraph "Subprocess - GTK3 Context"
+        TrayService[tray_service.py<br/>TrayService<br/><b>GTK3/AppIndicator</b>]
+        TrayIcons[tray_icons.py<br/>Icon Generator<br/><b>PIL/Python stdlib</b><br/>No GTK dependency]
+
+        TrayService -->|imports & uses| TrayIcons
+    end
+
+    TrayMgr -.->|spawns subprocess<br/>subprocess.Popen| TrayService
+    TrayMgr <-->|JSON IPC<br/>stdin/stdout pipes| TrayService
+
+    style App fill:#e3f2fd,stroke:#1976d2,stroke-width:2px
+    style TrayMgr fill:#e3f2fd,stroke:#1976d2,stroke-width:2px
+    style TrayService fill:#fff3e0,stroke:#f57c00,stroke-width:2px
+    style TrayIcons fill:#f1f8e9,stroke:#689f38,stroke-width:2px
+```
+
+**Component Descriptions:**
+
+| Component | GTK Version | Role |
+|-----------|-------------|------|
+| **app.py** | GTK4 | Main application class (`Adw.Application`). Creates and manages the `TrayManager` instance. |
+| **tray_manager.py** | GTK4 | Spawns the tray subprocess, sends JSON commands via stdin, receives events via stdout. Thread-safe with `GLib.idle_add()` for callbacks. |
+| **tray_service.py** | GTK3 | Subprocess entry point. Loads GTK3 and AppIndicator3, creates system tray indicator, processes commands from stdin, sends events to stdout. |
+| **tray_icons.py** | None | Utility module for generating composite tray icons with status badges using PIL. No GTK dependency. |
+
+**Why This Split?**
+
+- **GTK3/GTK4 Isolation**: AppIndicator3 requires GTK3, but ClamUI uses GTK4. These versions cannot coexist in one Python process.
+- **Process Boundary**: `tray_manager.py` and `tray_service.py` communicate across a subprocess boundary via JSON over pipes.
+- **Icon Generation**: `tray_icons.py` is GTK-agnostic and can be imported by either context.
+
+## Runtime Architecture
 
 ```mermaid
 graph TB
