@@ -1861,89 +1861,919 @@ sudo clamconf | grep -E "ReadTimeout|MaxScanTime"
 
 ## Database Update Issues
 
+ClamUI uses `freshclam` to update the ClamAV virus definition database. The updater module (`src/core/updater.py`) handles automatic privilege escalation via `pkexec` and provides detailed error reporting.
+
 ### freshclam permission errors
 
-**Symptoms**: "Permission denied" when updating virus database
+**Symptoms:**
+- Error message: "Authentication cancelled. Database update requires administrator privileges."
+- Error message: "Authorization failed. You are not authorized to update the database."
+- Error message: "Permission denied. You may need elevated privileges to update the database."
+- Exit codes 126 (authentication cancelled) or 127 (not authorized) from pkexec
+- Update button disabled or update fails immediately
 
-**Solution**: Run freshclam with appropriate permissions
+**Diagnostic Steps:**
+
+1. **Verify freshclam is installed:**
+```bash
+which freshclam
+freshclam --version
+```
+
+Expected output:
+```
+ClamAV 1.0.0/26700/Thu Jan  2 08:30:02 2024
+```
+
+2. **Check database directory permissions:**
+```bash
+# Ubuntu/Debian/Fedora
+ls -la /var/lib/clamav/
+
+# Expected: owned by clamav:clamav or root:root
+drwxr-xr-x 2 clamav clamav 4096 Jan  2 12:00 /var/lib/clamav/
+-rw-r--r-- 1 clamav clamav  123M Jan  2 12:00 daily.cvd
+-rw-r--r-- 1 clamav clamav   56M Jan  2 12:00 main.cvd
+```
+
+3. **Test pkexec authentication:**
+```bash
+pkexec freshclam --version
+# Should prompt for password and display version
+```
+
+**Solutions:**
+
+**Solution 1: Use polkit authentication (recommended)**
+
+ClamUI automatically uses `pkexec` for privilege escalation. When prompted:
+1. Enter your user password
+2. Ensure your user is in the `sudo` or `wheel` group
+
+Verify group membership:
+```bash
+groups
+# Should include 'sudo' (Ubuntu/Debian) or 'wheel' (Fedora/Arch)
+```
+
+Add user to sudo group if needed:
+```bash
+# Ubuntu/Debian
+sudo usermod -aG sudo $USER
+
+# Fedora/Arch
+sudo usermod -aG wheel $USER
+
+# Log out and back in for changes to take effect
+```
+
+**Solution 2: Fix polkit configuration**
+
+If authentication fails despite correct password:
 
 ```bash
-# Option 1: Use sudo
-sudo freshclam
+# Check PolicyKit rules
+pkaction --action-id org.freedesktop.policykit.exec --verbose
 
-# Option 2: Configure freshclam to run as your user (advanced)
-# Edit /etc/clamav/freshclam.conf
-sudo nano /etc/clamav/freshclam.conf
-# Set: DatabaseOwner yourusername
+# For Flatpak installations, ensure host PolicyKit is accessible
+flatpak override --user --talk-name=org.freedesktop.PolicyKit1 com.github.rooki.ClamUI
 ```
+
+**Solution 3: Configure manual freshclam with sudo (fallback)**
+
+If pkexec doesn't work, update manually:
+```bash
+sudo freshclam
+```
+
+Then configure automatic updates (see [Outdated database warnings](#outdated-database-warnings)).
+
+**Solution 4: Run ClamUI from terminal to see detailed errors**
+
+```bash
+# Native installation
+clamui
+
+# Flatpak installation
+flatpak run com.github.rooki.ClamUI
+
+# Watch for error messages in terminal output like:
+# "pkexec error: [details]"
+# "freshclam: ERROR: [specific error]"
+```
+
+**Flatpak-Specific Considerations:**
+
+Flatpak uses `flatpak-spawn --host` to run freshclam on the host system:
+
+```bash
+# Verify host freshclam is accessible
+flatpak-spawn --host freshclam --version
+
+# If this fails, freshclam is not installed on the host
+# Install ClamAV on the host system (not inside Flatpak)
+```
+
+---
 
 ### Running updates without root
 
-**Symptoms**: Don't have root access but need to update database
+**Symptoms:**
+- Don't have administrator privileges
+- Cannot use sudo or pkexec
+- Need to update database for personal use only
+- Error: "Permission denied" when updating to system location
 
-**Solution**: Use local database directory
+**Solution: Use a local user database directory**
+
+**Step 1: Create local database directory**
 
 ```bash
-# Create local database directory
 mkdir -p ~/.local/share/clamav
-
-# Update to local directory
-freshclam --datadir=$HOME/.local/share/clamav
-
-# Configure ClamUI to use local database (if needed)
-# This is usually automatic
 ```
+
+**Step 2: Update to local directory**
+
+```bash
+freshclam --datadir=$HOME/.local/share/clamav --config-file=/dev/null
+
+# With verbose output to see progress
+freshclam --datadir=$HOME/.local/share/clamav --config-file=/dev/null --verbose
+```
+
+Expected output:
+```
+ClamAV update process started at Thu Jan  2 12:00:00 2024
+Downloading main.cvd [100%]
+main.cvd updated (version: 62, sigs: 6647427)
+Downloading daily.cvd [100%]
+daily.cvd updated (version: 27154, sigs: 2044356)
+Database updated (8691783 signatures) from database.clamav.net
+```
+
+**Step 3: Configure clamscan to use local database**
+
+When scanning with clamscan directly, specify the database directory:
+```bash
+clamscan --database=$HOME/.local/share/clamav /path/to/scan
+```
+
+**Step 4: Verify local database**
+
+```bash
+ls -lh ~/.local/share/clamav/
+# Should show main.cvd, daily.cvd, and bytecode.cvd
+```
+
+**ClamUI Automatic Detection:**
+
+ClamUI automatically detects database locations in this order:
+1. `/var/lib/clamav/` (system default)
+2. `/var/db/clamav/` (alternative system location)
+3. `~/.local/share/clamav/` (user location)
+
+If you've created a local database, ClamUI should detect and use it automatically.
+
+**Creating a local freshclam configuration:**
+
+For regular updates without root, create a user freshclam configuration:
+
+```bash
+# Create config directory
+mkdir -p ~/.config/clamav
+
+# Create freshclam configuration
+cat > ~/.config/clamav/freshclam.conf <<EOF
+DatabaseDirectory $HOME/.local/share/clamav
+UpdateLogFile $HOME/.local/share/clamav/freshclam.log
+DatabaseMirror database.clamav.net
+LogVerbose yes
+EOF
+
+# Update using your config
+freshclam --config-file=$HOME/.config/clamav/freshclam.conf
+```
+
+**Automate local updates with cron:**
+
+```bash
+# Add to crontab (update daily at 3 AM)
+crontab -e
+
+# Add this line:
+0 3 * * * /usr/bin/freshclam --config-file=$HOME/.config/clamav/freshclam.conf --quiet
+```
+
+**Limitations:**
+- Local databases are per-user (not system-wide)
+- Must manually update (ClamUI update button won't work without privileges)
+- Clamd daemon typically requires system database location
+
+---
 
 ### Database location issues
 
-**Symptoms**: ClamAV can't find virus database
+**Symptoms:**
+- Error: "Can't open/parse the config file"
+- Error: "Database initialization error"
+- ClamAV can't find virus database
+- Warning: "Virus database date/version is older than 7 days"
+- Scans fail with "no database found" error
 
-**Solution**: Verify database location and permissions
+**Diagnostic Steps:**
+
+1. **Check common database locations:**
 
 ```bash
-# Common database locations
-ls -la /var/lib/clamav/  # Most distributions
-ls -la /var/db/clamav/   # Some systems
+# Ubuntu/Debian/Fedora (most common)
+ls -lh /var/lib/clamav/
+
+# Alternative location (some BSD systems, Arch Linux)
+ls -lh /var/db/clamav/
+
+# User local database
+ls -lh ~/.local/share/clamav/
+
+# Expected files:
+# main.cvd (or main.cld)     - Main virus database (~100-200MB)
+# daily.cvd (or daily.cld)   - Daily updates (~50-150MB)
+# bytecode.cvd (or bytecode.cld) - Bytecode signatures (~1-10MB)
+```
+
+2. **Check ClamAV configuration:**
+
+```bash
+# Ubuntu/Debian
+grep "^DatabaseDirectory" /etc/clamav/clamd.conf
+grep "^DatabaseDirectory" /etc/clamav/freshclam.conf
+
+# Fedora
+grep "^DatabaseDirectory" /etc/clamd.d/scan.conf
+grep "^DatabaseDirectory" /etc/freshclam.conf
+
+# Expected output:
+DatabaseDirectory /var/lib/clamav
+```
+
+3. **Verify database file integrity:**
+
+```bash
+# Check if database files are complete and not corrupted
+cd /var/lib/clamav  # or your database directory
+file *.cvd *.cld 2>/dev/null
+
+# Expected output for .cvd files:
+daily.cvd: ClamAV virus database
+main.cvd: ClamAV virus database
+```
+
+4. **Test clamscan with explicit database path:**
+
+```bash
+# Test if clamscan can load the database
+clamscan --database=/var/lib/clamav /tmp/testfile
+
+# Should output:
+# Loading:     3/3 signatures loaded.
+```
+
+**Solutions:**
+
+**Solution 1: Update the database to correct location**
+
+```bash
+# Update to system location (requires root)
+sudo freshclam
+
+# Update to user location
+mkdir -p ~/.local/share/clamav
+freshclam --datadir=$HOME/.local/share/clamav --config-file=/dev/null
+
+# Verify database files exist
+ls -lh /var/lib/clamav/*.cvd /var/lib/clamav/*.cld 2>/dev/null
+```
+
+**Solution 2: Fix database directory permissions**
+
+```bash
+# Check current permissions
+ls -la /var/lib/clamav/
+
+# Fix ownership (Ubuntu/Debian)
+sudo chown -R clamav:clamav /var/lib/clamav/
+sudo chmod 755 /var/lib/clamav/
+sudo chmod 644 /var/lib/clamav/*.cvd /var/lib/clamav/*.cld 2>/dev/null
+
+# Fix ownership (Fedora - some versions use different user)
+sudo chown -R clamscan:clamscan /var/lib/clamav/
+sudo chmod 755 /var/lib/clamav/
+```
+
+**Solution 3: Recreate database directory**
+
+If the directory is missing or severely corrupted:
+
+```bash
+# Backup any existing database
+sudo mkdir -p /var/lib/clamav.backup
+sudo mv /var/lib/clamav/* /var/lib/clamav.backup/ 2>/dev/null
+
+# Recreate directory
+sudo mkdir -p /var/lib/clamav
+sudo chown clamav:clamav /var/lib/clamav
+sudo chmod 755 /var/lib/clamav
+
+# Download fresh database
+sudo freshclam
+```
+
+**Solution 4: Configure ClamAV to use custom database location**
+
+If you need to use a non-standard location:
+
+```bash
+# Edit clamd configuration
+sudo nano /etc/clamav/clamd.conf  # Ubuntu/Debian
+sudo nano /etc/clamd.d/scan.conf   # Fedora
+
+# Set custom database directory
+DatabaseDirectory /custom/path/to/database
+
+# Also update freshclam configuration
+sudo nano /etc/clamav/freshclam.conf  # Ubuntu/Debian
+sudo nano /etc/freshclam.conf          # Fedora
+
+# Set same database directory
+DatabaseDirectory /custom/path/to/database
+
+# Ensure directory exists and has correct permissions
+sudo mkdir -p /custom/path/to/database
+sudo chown clamav:clamav /custom/path/to/database
+sudo chmod 755 /custom/path/to/database
 
 # Update database
 sudo freshclam
+
+# Restart clamd daemon
+sudo systemctl restart clamav-daemon  # Ubuntu/Debian
+sudo systemctl restart clamd@scan     # Fedora
 ```
+
+**Solution 5: Handle "Database is locked" error**
+
+**Symptoms:** Error message "Database is locked. Another freshclam instance may be running."
+
+This error appears when:
+- Another freshclam process is already updating
+- A stale lock file exists from a crashed update
+- The automatic freshclam daemon is running
+
+```bash
+# Check for running freshclam processes
+ps aux | grep freshclam
+
+# If found, wait for it to complete or kill it
+sudo killall freshclam
+
+# Check for lock file
+ls -la /var/lib/clamav/*.lck 2>/dev/null
+
+# Remove stale lock file (only if no freshclam is running)
+sudo rm /var/lib/clamav/freshclam.lck
+
+# Try update again
+sudo freshclam
+```
+
+**Verification:**
+
+After fixing database location issues:
+
+```bash
+# Verify database is loaded
+clamscan --version
+
+# Should show:
+ClamAV 1.0.0/26700/Thu Jan  2 08:30:02 2024
+
+# Test scan with EICAR test file
+curl -o /tmp/eicar.com https://secure.eicar.org/eicar.com.txt
+clamscan /tmp/eicar.com
+
+# Should detect:
+/tmp/eicar.com: Win.Test.EICAR_HDB-1 FOUND
+```
+
+---
 
 ### Network connectivity problems
 
-**Symptoms**: Database update fails with network errors
+**Symptoms:**
+- Error: "Connection error. Please check your network connection."
+- Error: "DNS resolution failed. Please check your network settings."
+- Error: "Can't connect to database.clamav.net"
+- Error: "Timeout while downloading"
+- Update hangs or takes extremely long
+- Error messages containing "can't connect", "connection refused", "host not found"
 
-**Solution**: Check network and DNS
+**Diagnostic Steps:**
+
+1. **Test basic network connectivity:**
 
 ```bash
-# Test connectivity to ClamAV mirrors
-ping database.clamav.net
+# Ping ClamAV database server
+ping -c 4 database.clamav.net
 
-# Update with verbose output
-sudo freshclam -v
-
-# Try different mirror (in /etc/clamav/freshclam.conf)
-sudo nano /etc/clamav/freshclam.conf
-# Add: DatabaseMirror db.us.clamav.net
+# Expected output:
+64 bytes from database.clamav.net (104.16.218.84): icmp_seq=1 ttl=54 time=15.2 ms
 ```
+
+2. **Test DNS resolution:**
+
+```bash
+# Resolve ClamAV mirror addresses
+nslookup database.clamav.net
+dig database.clamav.net
+
+# Should return multiple IP addresses
+```
+
+3. **Test HTTP/HTTPS connectivity:**
+
+```bash
+# Test download from ClamAV CDN
+curl -I https://database.clamav.net/daily.cvd
+
+# Expected: HTTP 200 OK or 302 redirect
+HTTP/2 200
+content-type: application/octet-stream
+```
+
+4. **Check firewall and proxy settings:**
+
+```bash
+# Check if firewall is blocking outbound connections
+sudo iptables -L -n | grep -i clamav
+sudo ufw status
+
+# Check proxy environment variables
+echo $http_proxy
+echo $https_proxy
+echo $HTTP_PROXY
+echo $HTTPS_PROXY
+```
+
+**Solutions:**
+
+**Solution 1: Verify network connection**
+
+```bash
+# Test general internet connectivity
+ping -c 4 8.8.8.8  # Google DNS
+ping -c 4 1.1.1.1  # Cloudflare DNS
+
+# If general connectivity fails, troubleshoot network first
+# Check NetworkManager or systemd-networkd status
+systemctl status NetworkManager
+nmcli device status
+```
+
+**Solution 2: Fix DNS resolution issues**
+
+```bash
+# Test DNS resolution
+nslookup database.clamav.net
+
+# If DNS fails, try different DNS servers
+# Temporarily use Google DNS
+sudo nano /etc/resolv.conf
+# Add:
+nameserver 8.8.8.8
+nameserver 8.8.4.4
+
+# Or use systemd-resolved
+sudo systemctl restart systemd-resolved
+resolvectl status
+
+# Permanent DNS configuration (Ubuntu/Debian)
+sudo nano /etc/systemd/resolved.conf
+# Set:
+[Resolve]
+DNS=8.8.8.8 8.8.4.4
+FallbackDNS=1.1.1.1
+
+sudo systemctl restart systemd-resolved
+```
+
+**Solution 3: Configure proxy settings for freshclam**
+
+If you're behind a corporate proxy or firewall:
+
+```bash
+# Edit freshclam configuration
+sudo nano /etc/clamav/freshclam.conf  # Ubuntu/Debian
+sudo nano /etc/freshclam.conf          # Fedora
+
+# Add proxy settings (remove leading # to uncomment)
+HTTPProxyServer proxy.example.com
+HTTPProxyPort 8080
+
+# If proxy requires authentication
+HTTPProxyUsername your_username
+HTTPProxyPassword your_password
+
+# For HTTPS proxy
+# HTTPSProxyServer proxy.example.com
+# HTTPSProxyPort 8080
+
+# Save and test
+sudo freshclam --verbose
+```
+
+**Solution 4: Use alternative database mirrors**
+
+If the default mirror is unreachable, configure alternative mirrors:
+
+```bash
+# Edit freshclam configuration
+sudo nano /etc/clamav/freshclam.conf  # Ubuntu/Debian
+sudo nano /etc/freshclam.conf          # Fedora
+
+# Comment out default mirror and add alternatives
+# DatabaseMirror database.clamav.net
+
+# Add specific regional mirrors (choose closest to your location)
+DatabaseMirror db.us.clamav.net        # United States
+DatabaseMirror db.eu.clamav.net        # Europe
+DatabaseMirror db.jp.clamav.net        # Japan
+DatabaseMirror db.au.clamav.net        # Australia
+
+# Or use CloudFlare mirror
+DatabaseMirror database.clamav.net
+
+# Save and update
+sudo freshclam --verbose
+```
+
+**Solution 5: Bypass firewall restrictions**
+
+If corporate firewall blocks ClamAV updates:
+
+```bash
+# Allow outbound HTTPS to ClamAV servers
+sudo ufw allow out to database.clamav.net
+sudo ufw allow out 443/tcp
+
+# For iptables
+sudo iptables -A OUTPUT -p tcp -d database.clamav.net --dport 443 -j ACCEPT
+
+# Check if SELinux is blocking (Fedora/RHEL)
+sudo ausearch -m avc -ts recent | grep freshclam
+
+# If blocked by SELinux, allow HTTP/HTTPS for freshclam
+sudo setsebool -P antivirus_can_scan_system 1
+sudo setsebool -P antivirus_use_jit 1
+```
+
+**Solution 6: Download database manually**
+
+If automated updates consistently fail, download manually:
+
+```bash
+# Create temporary directory
+mkdir -p /tmp/clamav-db
+cd /tmp/clamav-db
+
+# Download database files manually
+wget https://database.clamav.net/main.cvd
+wget https://database.clamav.net/daily.cvd
+wget https://database.clamav.net/bytecode.cvd
+
+# Or use curl
+curl -O https://database.clamav.net/main.cvd
+curl -O https://database.clamav.net/daily.cvd
+curl -O https://database.clamav.net/bytecode.cvd
+
+# Verify downloads (should be 100-200MB for main, 50-150MB for daily)
+ls -lh
+
+# Move to ClamAV database directory
+sudo mv *.cvd /var/lib/clamav/
+sudo chown clamav:clamav /var/lib/clamav/*.cvd
+sudo chmod 644 /var/lib/clamav/*.cvd
+
+# Verify database loads
+clamscan --version
+```
+
+**Solution 7: Increase timeout for slow connections**
+
+For slow or unreliable networks:
+
+```bash
+# Edit freshclam configuration
+sudo nano /etc/clamav/freshclam.conf  # Ubuntu/Debian
+sudo nano /etc/freshclam.conf          # Fedora
+
+# Increase timeout values (default is 30 seconds)
+ConnectTimeout 120
+ReceiveTimeout 120
+
+# Set maximum download attempts
+MaxAttempts 5
+
+# Save and update
+sudo freshclam --verbose
+```
+
+**Solution 8: Check system clock**
+
+Incorrect system time can cause SSL certificate validation failures:
+
+```bash
+# Check current system time
+date
+
+# Sync with NTP servers
+sudo timedatectl set-ntp true
+sudo systemctl restart systemd-timesyncd
+
+# Or use ntpdate
+sudo ntpdate pool.ntp.org
+
+# Verify time is correct
+timedatectl status
+```
+
+**Flatpak-Specific Network Issues:**
+
+```bash
+# Verify Flatpak has network access
+flatpak info --show-permissions com.github.rooki.ClamUI | grep network
+
+# Should show:
+# network
+
+# If missing, grant network permission
+flatpak override --user --share=network com.github.rooki.ClamUI
+
+# Test network from within Flatpak
+flatpak run --command=sh com.github.rooki.ClamUI
+# Inside Flatpak shell:
+ping -c 4 database.clamav.net
+```
+
+**Verification:**
+
+```bash
+# Test update with verbose output
+sudo freshclam --verbose
+
+# Expected successful output:
+ClamAV update process started at Thu Jan  2 12:00:00 2024
+Downloading main.cvd [100%]
+main.cvd updated (version: 62, sigs: 6647427)
+Downloading daily.cvd [100%]
+daily.cvd updated (version: 27154, sigs: 2044356)
+Database updated (8691783 signatures) from database.clamav.net
+
+# Check database age
+clamscan --version
+# Should show recent date (within 1-2 days)
+ClamAV 1.0.0/26700/Thu Jan  2 08:30:02 2024
+                    ^^^^^^^^ Recent date
+```
+
+---
 
 ### Outdated database warnings
 
-**Symptoms**: Warning that virus database is outdated
+**Symptoms:**
+- Warning: "Your virus database is outdated"
+- Warning: "Virus database date/version is older than 7 days"
+- ClamUI displays "Last updated: X days ago" with warning icon
+- Update view shows red/orange status indicator
+- Scans may miss new malware variants
 
-**Solution**: Update the database regularly
+**Why database updates matter:**
+
+New malware variants emerge daily. ClamAV releases database updates multiple times per day. An outdated database (>7 days old) significantly reduces detection effectiveness.
+
+**Recommended update frequency:**
+- **Minimum:** Weekly
+- **Recommended:** Daily
+- **Optimal:** Multiple times per day (automated)
+
+**Solution 1: Enable automatic database updates (recommended)**
+
+The best approach is to enable the ClamAV freshclam daemon for automatic updates.
+
+**Ubuntu/Debian:**
 
 ```bash
-# Manual update
+# Enable and start freshclam daemon
+sudo systemctl enable clamav-freshclam
+sudo systemctl start clamav-freshclam
+
+# Verify it's running
+sudo systemctl status clamav-freshclam
+
+# Expected output:
+● clamav-freshclam.service - ClamAV virus database updater
+     Loaded: loaded (/lib/systemd/system/clamav-freshclam.service; enabled)
+     Active: active (running) since Thu 2024-01-02 12:00:00 UTC
+```
+
+**Fedora/RHEL/CentOS:**
+
+```bash
+# Enable and start freshclam daemon
+sudo systemctl enable clamav-freshclam.service
+sudo systemctl start clamav-freshclam.service
+
+# Verify it's running
+sudo systemctl status clamav-freshclam.service
+```
+
+**Arch Linux:**
+
+```bash
+# Enable and start freshclam timer (uses systemd timer, not daemon)
+sudo systemctl enable clamav-freshclam.timer
+sudo systemctl start clamav-freshclam.timer
+
+# Verify timer is active
+sudo systemctl list-timers | grep clamav
+
+# Expected output:
+Thu 2024-01-02 13:00:00 UTC  1h left  clamav-freshclam.timer
+```
+
+**Configuration for automatic updates:**
+
+```bash
+# Edit freshclam configuration
+sudo nano /etc/clamav/freshclam.conf  # Ubuntu/Debian
+sudo nano /etc/freshclam.conf          # Fedora
+
+# Ensure these settings are configured:
+Checks 24                    # Check for updates 24 times per day (hourly)
+DatabaseMirror database.clamav.net
+LogVerbose yes
+UpdateLogFile /var/log/clamav/freshclam.log
+
+# Comment out this line if present (prevents daemon mode)
+# Example
+
+# Save and restart service
+sudo systemctl restart clamav-freshclam
+```
+
+**Solution 2: Manual update via ClamUI**
+
+1. Open ClamUI
+2. Navigate to "Database Update" view (database icon in sidebar)
+3. Click "Update Database" button
+4. Enter your password when prompted by pkexec
+5. Wait for update to complete (typically 1-5 minutes)
+
+**Solution 3: Manual update via command line**
+
+```bash
+# Update database immediately
 sudo freshclam
 
-# Enable automatic updates (recommended)
-sudo systemctl enable --now clamav-freshclam  # Ubuntu/Debian
-sudo systemctl enable --now clamav-freshclam.service  # Fedora
+# Update with verbose output (shows progress)
+sudo freshclam --verbose
 
-# Verify automatic updates are running
-sudo systemctl status clamav-freshclam
+# Expected output:
+ClamAV update process started at Thu Jan  2 12:00:00 2024
+Downloading main.cvd [100%]
+main.cvd updated (version: 62, sigs: 6647427)
+Downloading daily.cvd [100%]
+daily.cvd updated (version: 27154, sigs: 2044356)
+Database updated (8691783 signatures) from database.clamav.net
 ```
+
+**Solution 4: Schedule updates with cron (if systemd not available)**
+
+If systemd is not available or you prefer cron:
+
+```bash
+# Edit system crontab
+sudo crontab -e
+
+# Add freshclam to run every 4 hours
+0 */4 * * * /usr/bin/freshclam --quiet
+
+# Or run once daily at 3 AM
+0 3 * * * /usr/bin/freshclam --quiet
+
+# Or run twice daily (3 AM and 3 PM)
+0 3,15 * * * /usr/bin/freshclam --quiet
+
+# Verify cron job
+sudo crontab -l
+```
+
+**Solution 5: Force immediate update**
+
+If update is stuck or database is very old:
+
+```bash
+# Stop freshclam daemon (if running)
+sudo systemctl stop clamav-freshclam
+
+# Remove lock file (if exists)
+sudo rm -f /var/lib/clamav/freshclam.lck
+
+# Force update
+sudo freshclam --verbose
+
+# Restart daemon
+sudo systemctl start clamav-freshclam
+
+# Verify database is current
+clamscan --version
+```
+
+**Monitoring database freshness:**
+
+```bash
+# Check database version and date
+clamscan --version
+
+# Output shows database date:
+ClamAV 1.0.0/26700/Thu Jan  2 08:30:02 2024
+#                   ^^^^^^^^ Database version
+#                           ^^^^^^^^^^^^^^^^^^^ Last update date
+
+# Check when database was last modified
+ls -lh /var/lib/clamav/*.cvd /var/lib/clamav/*.cld
+
+# Check freshclam log for recent updates
+sudo tail -n 50 /var/log/clamav/freshclam.log
+```
+
+**Troubleshooting automatic updates not running:**
+
+```bash
+# Check systemd timer/service status
+sudo systemctl status clamav-freshclam
+
+# If failed, check journalctl for errors
+sudo journalctl -u clamav-freshclam -n 50
+
+# Common issues and fixes:
+
+# Issue: Service disabled
+sudo systemctl enable clamav-freshclam
+
+# Issue: Configuration error
+sudo freshclam --verbose  # Will show config errors
+
+# Issue: Lock file preventing updates
+sudo rm -f /var/lib/clamav/freshclam.lck
+sudo systemctl restart clamav-freshclam
+
+# Issue: "Example" line not commented in config
+sudo nano /etc/clamav/freshclam.conf
+# Find and comment out (or remove):
+# Example
+# Should be:
+# Example  (commented out)
+
+sudo systemctl restart clamav-freshclam
+```
+
+**Verification:**
+
+After setting up automatic updates:
+
+```bash
+# Wait 1-2 hours, then check database date
+clamscan --version
+
+# Check freshclam log for successful updates
+sudo tail -n 20 /var/log/clamav/freshclam.log
+
+# Expected in log:
+Database updated (8691783 signatures) from database.clamav.net
+
+# Verify daemon is running
+sudo systemctl is-active clamav-freshclam
+# Should output: active
+
+# Check next scheduled update (for timer-based systems)
+sudo systemctl list-timers | grep clamav
+```
+
+**Best practices:**
+1. Enable automatic updates (systemd service or timer)
+2. Monitor logs periodically to ensure updates succeed
+3. Keep update logs for troubleshooting: `/var/log/clamav/freshclam.log`
+4. Update manually before important scans if automated updates haven't run recently
+5. Set up monitoring/alerts if running ClamAV in production environments
 
 ---
 
