@@ -188,3 +188,39 @@ class ConnectionPool:
         finally:
             # Always release connection back to pool
             self.release(conn)
+
+    def close_all(self) -> None:
+        """
+        Close all connections in the pool and prevent new connections.
+
+        This method drains the connection pool, closes all connections, and sets
+        a flag to prevent new connections from being created. Safe to call multiple
+        times. Essential for proper resource cleanup.
+
+        After calling this method:
+        - All connections in the pool are closed
+        - acquire() will raise RuntimeError
+        - release() will close connections instead of returning them to pool
+
+        Thread-safe operation using internal lock.
+        """
+        with self._lock:
+            # Set closed flag to prevent new connections
+            self._closed = True
+
+            # Drain and close all connections from the pool
+            while True:
+                try:
+                    # Get connection without blocking
+                    conn = self._pool.get(block=False)
+                    # Close the connection
+                    try:
+                        conn.close()
+                    except sqlite3.Error:
+                        # Ignore errors closing already-closed connections
+                        pass
+                    # Decrement total connections count
+                    self._total_connections -= 1
+                except queue.Empty:
+                    # Pool is empty - we're done
+                    break
