@@ -374,6 +374,7 @@ update-desktop-database ~/.local/share/applications
 ## See Also
 
 - [README.md](../README.md) - Project overview and quick start
+- [CONFIGURATION.md](./CONFIGURATION.md) - Configuration reference and settings guide
 - [DEBIAN_PACKAGING.md](../DEBIAN_PACKAGING.md) - Detailed Debian packaging guide
 - [FLATPAK_SUBMISSION.md](../FLATPAK_SUBMISSION.md) - Flathub submission documentation
 - [docs/DEVELOPMENT.md](./DEVELOPMENT.md) - Development setup and contributing
