@@ -21,7 +21,10 @@ This guide helps you diagnose and resolve common issues with ClamUI. If you enco
    - [Tray icon not appearing](#tray-icon-not-appearing)
    - [AppIndicator library missing](#appindicator-library-missing)
    - [GNOME Shell tray support](#gnome-shell-tray-support)
+   - [Desktop environment compatibility](#desktop-environment-compatibility)
+   - [Flatpak tray icon issues](#flatpak-tray-icon-issues)
    - [Tray icon status not updating](#tray-icon-status-not-updating)
+   - [Tray icon shows wrong icon or generic fallback](#tray-icon-shows-wrong-icon-or-generic-fallback)
 
 4. [File Manager Context Menu Issues](#file-manager-context-menu-issues)
    - [Context menu not appearing](#context-menu-not-appearing)
@@ -339,17 +342,40 @@ If notifications still don't work:
 
 ### Tray icon not appearing
 
-**Symptoms**: ClamUI runs but no tray icon is visible
+**Symptoms**: ClamUI runs but no tray icon is visible in the system tray
 
 **Possible causes and solutions**:
 
 1. **AppIndicator library missing** - See [AppIndicator library missing](#appindicator-library-missing)
 2. **GNOME Shell missing extension** - See [GNOME Shell tray support](#gnome-shell-tray-support)
-3. **Tray disabled in settings** - Open ClamUI preferences and enable "Show tray icon"
+3. **Desktop environment doesn't support tray** - See [Desktop environment compatibility](#desktop-environment-compatibility)
+4. **Tray disabled in settings** - Open ClamUI Preferences → General and enable "Show tray icon"
+5. **Flatpak-specific issues** - See [Flatpak tray icon issues](#flatpak-tray-icon-issues)
+
+**Quick diagnostic**:
+
+```bash
+# Check if AppIndicator library is installed
+dpkg -l | grep ayatana  # Ubuntu/Debian
+rpm -qa | grep ayatana  # Fedora
+
+# Run ClamUI from terminal to see error messages
+clamui  # or: flatpak run com.github.rooki.ClamUI
+```
+
+Look for error messages like:
+- `"System tray indicator unavailable: Missing library"`
+- `"AppIndicator library not found"`
+- `"GTK version conflict"`
 
 ### AppIndicator library missing
 
-**Symptoms**: Warning in logs: "AppIndicator library not found"
+**Symptoms**:
+- Warning in logs: `"AppIndicator library not found"`
+- Error message: `"Missing library: No module named 'gi.repository.AyatanaAppIndicator3'"`
+- Tray icon doesn't appear on any desktop environment
+
+**Cause**: The AyatanaAppIndicator3 library is not installed on your system
 
 **Solution**: Install the AyatanaAppIndicator library
 
@@ -362,43 +388,239 @@ sudo dnf install libayatana-appindicator-gtk3
 
 # Arch Linux
 sudo pacman -S libayatana-appindicator
+
+# openSUSE
+sudo zypper install typelib-1_0-AyatanaAppIndicator3-0_1
 ```
 
-Restart ClamUI after installation.
+**Verify installation**:
+
+```bash
+# Check if library is available
+python3 -c "from gi.repository import AyatanaAppIndicator3; print('AppIndicator available')"
+```
+
+**After installation**: Restart ClamUI for changes to take effect.
 
 ### GNOME Shell tray support
 
-**Symptoms**: AppIndicator installed but tray icon still not visible on GNOME
+**Symptoms**:
+- AppIndicator library installed but tray icon still not visible on GNOME
+- Works on other desktop environments (KDE, XFCE) but not GNOME
+- GNOME Shell version 3.38+ or GNOME 40+
+
+**Cause**: GNOME Shell removed native tray icon support and requires an extension
 
 **Solution**: Install the AppIndicator Support extension
 
-1. Visit [GNOME Extensions: AppIndicator Support](https://extensions.gnome.org/extension/615/appindicator-support/)
-2. Install the extension
-3. Enable it in the GNOME Extensions app
-4. Restart ClamUI
+**Method 1: Via GNOME Extensions website** (recommended)
 
-Alternatively, install via package manager:
+1. Visit [GNOME Extensions: AppIndicator Support](https://extensions.gnome.org/extension/615/appindicator-support/)
+2. Click the ON/OFF toggle to install
+3. If prompted, install the browser extension first
+4. Enable the extension in GNOME Extensions app
+5. Restart ClamUI
+
+**Method 2: Via package manager**
 
 ```bash
-# Ubuntu
+# Ubuntu/Debian
 sudo apt install gnome-shell-extension-appindicator
 
 # Fedora
 sudo dnf install gnome-shell-extension-appindicator
+
+# After installation, enable the extension
+gnome-extensions enable appindicatorsupport@rgcjonas.gmail.com
+```
+
+**Method 3: Via Extension Manager app**
+
+1. Install Extension Manager: `flatpak install flathub com.mattjakeman.ExtensionManager`
+2. Search for "AppIndicator and KStatusNotifierItem Support"
+3. Install and enable
+4. Restart GNOME Shell: Press `Alt+F2`, type `r`, press Enter
+
+**Verify extension is active**:
+
+```bash
+gnome-extensions list --enabled | grep appindicator
+```
+
+### Desktop environment compatibility
+
+**Symptoms**: Tray icon works on some desktop environments but not others
+
+**Desktop-specific solutions**:
+
+**KDE Plasma**:
+- Tray icons should work natively with AppIndicator installed
+- If icon doesn't appear, right-click the system tray area → Configure System Tray → Entries → Enable "ClamUI"
+
+**XFCE**:
+- Install the XFCE Panel Plugin: `sudo apt install xfce4-indicator-plugin`
+- Add "Indicator Plugin" to your panel: Right-click panel → Panel → Add New Items → Indicator Plugin
+- Restart ClamUI
+
+**Cinnamon**:
+- Tray icons should work natively with AppIndicator installed
+- If icon doesn't appear, ensure "System Tray" applet is added to your panel
+- Applets → System Tray → Enable
+
+**MATE**:
+- Install indicator support: `sudo apt install mate-indicator-applet`
+- Add to panel: Right-click panel → Add to Panel → Indicator Applet
+- Restart ClamUI
+
+**LXQt**:
+- Install StatusNotifier plugin: `sudo apt install lxqt-panel-plugin-statusnotifier`
+- Add to panel: Right-click panel → Manage Widgets → StatusNotifier
+
+**Budgie**:
+- Tray icons should work natively with AppIndicator installed
+- Check Budgie Settings → Raven → Show System Tray
+
+### Flatpak tray icon issues
+
+**Symptoms**:
+- Tray icon doesn't appear when using Flatpak version
+- Works with native installation but not Flatpak
+- Error: `"Failed to start tray service subprocess"`
+
+**Cause**: Flatpak sandbox restrictions or missing host libraries
+
+**Solution 1: Install AppIndicator on host system**
+
+The Flatpak version requires AppIndicator library on the **host system** (not inside Flatpak):
+
+```bash
+# Install on your host OS (outside Flatpak)
+sudo apt install gir1.2-ayatanaappindicator3-0.1  # Ubuntu/Debian
+sudo dnf install libayatana-appindicator-gtk3     # Fedora
+sudo pacman -S libayatana-appindicator             # Arch
+```
+
+**Solution 2: Grant D-Bus permissions**
+
+Ensure the Flatpak has tray icon permissions:
+
+```bash
+# View current permissions
+flatpak info --show-permissions com.github.rooki.ClamUI
+
+# Grant StatusNotifier permissions (if missing)
+flatpak override --user --talk-name=org.kde.StatusNotifierWatcher com.github.rooki.ClamUI
+```
+
+**Solution 3: Enable XDG Desktop Portal**
+
+Some desktop environments need the desktop portal for tray support:
+
+```bash
+# Install the portal for your desktop environment
+sudo apt install xdg-desktop-portal-gtk   # GNOME/GTK-based
+sudo apt install xdg-desktop-portal-kde   # KDE
+```
+
+**Verify tray service is running**:
+
+```bash
+# Check if tray subprocess starts
+flatpak run com.github.rooki.ClamUI
+# Look for messages like: "Starting tray service" or "Tray service is ready"
 ```
 
 ### Tray icon status not updating
 
-**Symptoms**: Tray icon doesn't change during scans
+**Symptoms**:
+- Tray icon appears but doesn't change color/icon during scans
+- Icon stuck on one status (protected, scanning, etc.)
+- Progress percentage not showing during scans
 
-**Solution**: This is usually a timing issue. Try:
+**Possible causes and solutions**:
 
-1. Restart ClamUI
-2. Disable and re-enable the tray icon in preferences
-3. Check system logs for errors:
+**Cause 1: Icon theme doesn't have required symbolic icons**
 
 ```bash
-journalctl --user -u clamui --since today
+# Test if theme has required icons
+gtk-update-icon-cache -f /usr/share/icons/YOUR_THEME_NAME/
+
+# Switch to a standard icon theme temporarily
+gsettings set org.gnome.desktop.interface icon-theme 'Adwaita'
+```
+
+**Cause 2: Tray service subprocess crashed**
+
+```bash
+# Check for errors in logs
+journalctl --user -u clamui --since today | grep -i tray
+
+# Look for:
+# - "Tray service subprocess started"
+# - "Tray service is ready"
+# - Any error messages
+```
+
+**Cause 3: Communication issue between main app and tray subprocess**
+
+```bash
+# Run with debug logging
+CLAMUI_DEBUG=1 clamui
+
+# Or for Flatpak:
+flatpak run --env=CLAMUI_DEBUG=1 com.github.rooki.ClamUI
+```
+
+**Solution**: Try these steps in order:
+
+1. **Restart ClamUI** - Kills and restarts the tray subprocess
+2. **Disable and re-enable tray icon**:
+   - Open ClamUI Preferences → General
+   - Uncheck "Show tray icon"
+   - Click Apply
+   - Check "Show tray icon" again
+3. **Clear cached icon theme**:
+   ```bash
+   rm -rf ~/.cache/icon-cache
+   gtk-update-icon-cache
+   ```
+4. **Check for multiple instances**:
+   ```bash
+   # Kill any existing ClamUI processes
+   pkill -9 clamui
+   # Start fresh
+   clamui
+   ```
+
+### Tray icon shows wrong icon or generic fallback
+
+**Symptoms**:
+- Tray icon shows generic icons instead of ClamUI-specific icons
+- All statuses show the same icon
+- Icon doesn't match the application state
+
+**Cause**: Icon theme missing symbolic icons or ClamUI icon not installed
+
+**Solution**:
+
+```bash
+# Install complete icon theme
+sudo apt install adwaita-icon-theme-full
+
+# Update icon cache
+sudo gtk-update-icon-cache -f /usr/share/icons/Adwaita/
+sudo gtk-update-icon-cache -f /usr/share/icons/hicolor/
+
+# For user-installed icons
+gtk-update-icon-cache ~/.local/share/icons/hicolor/
+```
+
+**Verify ClamUI icon is installed**:
+
+```bash
+# Check for ClamUI icon
+ls -la /usr/share/icons/hicolor/scalable/apps/com.github.rooki.clamui.*
+ls -la ~/.local/share/icons/hicolor/scalable/apps/com.github.rooki.clamui.*
 ```
 
 ---
