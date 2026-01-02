@@ -155,8 +155,8 @@ class ScanView(Gtk.Box):
             }
 
             .severity-medium {
-                background-color: #f5c211;
-                color: #3d3846;
+                background-color: @warning_bg_color;
+                color: @warning_fg_color;
             }
 
             .severity-low {
