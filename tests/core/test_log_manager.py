@@ -1997,3 +1997,471 @@ class TestLogManagerIndexValidation:
 
         # Restore original glob
         log_manager._log_dir.glob = original_glob
+
+
+class TestLogManagerOptimizedGetLogs:
+    """Tests for optimized get_logs() implementation using index."""
+
+    @pytest.fixture
+    def temp_log_dir(self):
+        """Create a temporary directory for log storage."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            yield tmpdir
+
+    @pytest.fixture
+    def log_manager(self, temp_log_dir):
+        """Create a LogManager with a temporary directory."""
+        return LogManager(log_dir=temp_log_dir)
+
+    def test_get_logs_uses_index_when_available(self, log_manager):
+        """Test that get_logs() uses index for retrieval when available."""
+        # Create log entries
+        entries = []
+        for i in range(10):
+            entry = LogEntry.create(
+                log_type="scan" if i % 2 == 0 else "update",
+                status="clean",
+                summary=f"Test entry {i}",
+                details="Details",
+            )
+            log_manager.save_log(entry)
+            entries.append(entry)
+
+        # Verify index exists and has correct entries
+        index_data = log_manager._load_index()
+        assert len(index_data["entries"]) == 10
+
+        # Get logs should use the index
+        logs = log_manager.get_logs()
+        assert len(logs) == 10
+
+    def test_get_logs_returns_correct_results_with_index(self, log_manager):
+        """Test that get_logs() returns correct results when using index."""
+        # Create entries with specific timestamps to control order
+        entry1 = LogEntry(
+            id="id-1",
+            timestamp="2024-01-01T10:00:00",
+            type="scan",
+            status="clean",
+            summary="First",
+            details="Details",
+        )
+        entry2 = LogEntry(
+            id="id-2",
+            timestamp="2024-01-02T10:00:00",
+            type="scan",
+            status="clean",
+            summary="Second",
+            details="Details",
+        )
+        entry3 = LogEntry(
+            id="id-3",
+            timestamp="2024-01-03T10:00:00",
+            type="update",
+            status="success",
+            summary="Third",
+            details="Details",
+        )
+
+        log_manager.save_log(entry1)
+        log_manager.save_log(entry2)
+        log_manager.save_log(entry3)
+
+        # Get all logs
+        logs = log_manager.get_logs(limit=100)
+
+        # Should return all 3 logs
+        assert len(logs) == 3
+
+        # Should be sorted by timestamp descending (newest first)
+        assert logs[0].summary == "Third"
+        assert logs[1].summary == "Second"
+        assert logs[2].summary == "First"
+
+    def test_get_logs_fallback_to_full_scan_without_index(self, log_manager, temp_log_dir):
+        """Test that get_logs() falls back to full scan when index is missing."""
+        # Create log entries
+        entry1 = LogEntry.create(
+            log_type="scan",
+            status="clean",
+            summary="Entry 1",
+            details="Details",
+        )
+        entry2 = LogEntry.create(
+            log_type="update",
+            status="success",
+            summary="Entry 2",
+            details="Details",
+        )
+        log_manager.save_log(entry1)
+        log_manager.save_log(entry2)
+
+        # Delete the index file to simulate missing index
+        index_path = Path(temp_log_dir) / "log_index.json"
+        if index_path.exists():
+            index_path.unlink()
+
+        # get_logs() should fall back to full directory scan
+        logs = log_manager.get_logs()
+
+        # Should still return all logs
+        assert len(logs) == 2
+
+        # Verify we got the correct logs
+        summaries = {log.summary for log in logs}
+        assert "Entry 1" in summaries
+        assert "Entry 2" in summaries
+
+    def test_get_logs_fallback_to_full_scan_with_empty_index(self, log_manager, temp_log_dir):
+        """Test that get_logs() falls back to full scan when index is empty."""
+        # Create log entries
+        entry = LogEntry.create(
+            log_type="scan",
+            status="clean",
+            summary="Test entry",
+            details="Details",
+        )
+        log_manager.save_log(entry)
+
+        # Manually set index to empty (corrupt state)
+        log_manager._save_index({"version": 1, "entries": []})
+
+        # get_logs() should fall back to full directory scan
+        logs = log_manager.get_logs()
+
+        # Should still return the log via fallback
+        assert len(logs) == 1
+        assert logs[0].summary == "Test entry"
+
+    def test_get_logs_handles_missing_referenced_files(self, log_manager, temp_log_dir):
+        """Test that get_logs() handles missing referenced files gracefully."""
+        # Create log entries
+        entries = []
+        for i in range(5):
+            entry = LogEntry.create(
+                log_type="scan",
+                status="clean",
+                summary=f"Entry {i}",
+                details="Details",
+            )
+            log_manager.save_log(entry)
+            entries.append(entry)
+
+        # Delete one log file but leave it in the index
+        log_file = Path(temp_log_dir) / f"{entries[2].id}.json"
+        log_file.unlink()
+
+        # get_logs() should skip the missing file
+        logs = log_manager.get_logs()
+
+        # Should return only 4 logs (skipping the missing one)
+        assert len(logs) == 4
+
+        # Verify the missing entry is not in results
+        summaries = {log.summary for log in logs}
+        assert "Entry 2" not in summaries
+        assert "Entry 0" in summaries
+        assert "Entry 1" in summaries
+        assert "Entry 3" in summaries
+        assert "Entry 4" in summaries
+
+    def test_get_logs_type_filtering_with_index(self, log_manager):
+        """Test that get_logs() correctly filters by type when using index."""
+        # Create mixed entries
+        scan_entries = []
+        update_entries = []
+
+        for i in range(5):
+            scan_entry = LogEntry.create(
+                log_type="scan",
+                status="clean",
+                summary=f"Scan {i}",
+                details="Details",
+            )
+            log_manager.save_log(scan_entry)
+            scan_entries.append(scan_entry)
+
+        for i in range(3):
+            update_entry = LogEntry.create(
+                log_type="update",
+                status="success",
+                summary=f"Update {i}",
+                details="Details",
+            )
+            log_manager.save_log(update_entry)
+            update_entries.append(update_entry)
+
+        # Filter for scan logs only
+        scan_logs = log_manager.get_logs(log_type="scan")
+        assert len(scan_logs) == 5
+        for log in scan_logs:
+            assert log.type == "scan"
+
+        # Filter for update logs only
+        update_logs = log_manager.get_logs(log_type="update")
+        assert len(update_logs) == 3
+        for log in update_logs:
+            assert log.type == "update"
+
+    def test_get_logs_limit_application_with_index(self, log_manager):
+        """Test that get_logs() correctly applies limit when using index."""
+        # Create 20 entries
+        entries = []
+        for i in range(20):
+            entry = LogEntry.create(
+                log_type="scan",
+                status="clean",
+                summary=f"Entry {i}",
+                details="Details",
+            )
+            log_manager.save_log(entry)
+            entries.append(entry)
+            time.sleep(0.001)  # Small delay to ensure different timestamps
+
+        # Test various limits
+        logs_5 = log_manager.get_logs(limit=5)
+        assert len(logs_5) == 5
+
+        logs_10 = log_manager.get_logs(limit=10)
+        assert len(logs_10) == 10
+
+        logs_15 = log_manager.get_logs(limit=15)
+        assert len(logs_15) == 15
+
+        logs_100 = log_manager.get_logs(limit=100)
+        assert len(logs_100) == 20  # Only 20 exist
+
+    def test_get_logs_sort_order_verification_with_index(self, log_manager):
+        """Test that get_logs() returns logs sorted by timestamp descending."""
+        # Create entries with specific timestamps
+        timestamps = [
+            "2024-01-01T10:00:00",
+            "2024-01-05T15:30:00",
+            "2024-01-03T12:00:00",
+            "2024-01-07T08:00:00",
+            "2024-01-02T14:00:00",
+        ]
+
+        entries = []
+        for i, ts in enumerate(timestamps):
+            entry = LogEntry(
+                id=f"id-{i}",
+                timestamp=ts,
+                type="scan",
+                status="clean",
+                summary=f"Entry {i}",
+                details="Details",
+            )
+            log_manager.save_log(entry)
+            entries.append(entry)
+
+        # Get logs
+        logs = log_manager.get_logs()
+
+        # Should be sorted by timestamp descending
+        assert len(logs) == 5
+        assert logs[0].timestamp == "2024-01-07T08:00:00"  # Newest
+        assert logs[1].timestamp == "2024-01-05T15:30:00"
+        assert logs[2].timestamp == "2024-01-03T12:00:00"
+        assert logs[3].timestamp == "2024-01-02T14:00:00"
+        assert logs[4].timestamp == "2024-01-01T10:00:00"  # Oldest
+
+    def test_get_logs_combined_type_filter_and_limit_with_index(self, log_manager):
+        """Test that get_logs() correctly applies both type filter and limit."""
+        # Create 10 scan entries and 10 update entries
+        for i in range(10):
+            scan_entry = LogEntry.create(
+                log_type="scan",
+                status="clean",
+                summary=f"Scan {i}",
+                details="Details",
+            )
+            log_manager.save_log(scan_entry)
+            time.sleep(0.001)
+
+        for i in range(10):
+            update_entry = LogEntry.create(
+                log_type="update",
+                status="success",
+                summary=f"Update {i}",
+                details="Details",
+            )
+            log_manager.save_log(update_entry)
+            time.sleep(0.001)
+
+        # Get only scan logs with limit
+        scan_logs = log_manager.get_logs(limit=5, log_type="scan")
+        assert len(scan_logs) == 5
+        for log in scan_logs:
+            assert log.type == "scan"
+
+        # Get only update logs with limit
+        update_logs = log_manager.get_logs(limit=3, log_type="update")
+        assert len(update_logs) == 3
+        for log in update_logs:
+            assert log.type == "update"
+
+    def test_get_logs_with_corrupted_log_file_in_index(self, log_manager, temp_log_dir):
+        """Test that get_logs() skips corrupted log files when using index."""
+        # Create valid entries
+        entry1 = LogEntry.create(
+            log_type="scan",
+            status="clean",
+            summary="Valid entry 1",
+            details="Details",
+        )
+        entry2 = LogEntry.create(
+            log_type="scan",
+            status="clean",
+            summary="Valid entry 2",
+            details="Details",
+        )
+        log_manager.save_log(entry1)
+        log_manager.save_log(entry2)
+
+        # Create a corrupted log file
+        corrupted_id = "corrupted-id"
+        corrupted_path = Path(temp_log_dir) / f"{corrupted_id}.json"
+        with open(corrupted_path, "w", encoding="utf-8") as f:
+            f.write("{ invalid json }")
+
+        # Manually add corrupted entry to index
+        index_data = log_manager._load_index()
+        index_data["entries"].append({
+            "id": corrupted_id,
+            "timestamp": "2024-01-01T10:00:00",
+            "type": "scan"
+        })
+        log_manager._save_index(index_data)
+
+        # get_logs() should skip the corrupted file
+        logs = log_manager.get_logs()
+
+        # Should return only valid entries
+        assert len(logs) == 2
+        summaries = {log.summary for log in logs}
+        assert "Valid entry 1" in summaries
+        assert "Valid entry 2" in summaries
+
+    def test_get_logs_skips_index_file_in_fallback_scan(self, log_manager, temp_log_dir):
+        """Test that get_logs() skips the index file during fallback scan."""
+        # Create log entries
+        entry = LogEntry.create(
+            log_type="scan",
+            status="clean",
+            summary="Test entry",
+            details="Details",
+        )
+        log_manager.save_log(entry)
+
+        # Force fallback by deleting index
+        index_path = Path(temp_log_dir) / "log_index.json"
+        if index_path.exists():
+            index_path.unlink()
+
+        # get_logs() should not try to parse the index file as a log
+        logs = log_manager.get_logs()
+
+        # Should return only the actual log entry
+        assert len(logs) == 1
+        assert logs[0].summary == "Test entry"
+
+    def test_get_logs_performance_with_large_index(self, log_manager):
+        """Test that get_logs() efficiently handles large indices with limit."""
+        # Create 100 entries
+        for i in range(100):
+            entry = LogEntry.create(
+                log_type="scan" if i % 2 == 0 else "update",
+                status="clean",
+                summary=f"Entry {i}",
+                details="Details",
+            )
+            log_manager.save_log(entry)
+
+        # With index optimization, this should only load 10 files instead of 100
+        logs = log_manager.get_logs(limit=10)
+
+        # Should return exactly 10 logs
+        assert len(logs) == 10
+
+        # Should be the 10 most recent (newest first)
+        # Verify they're sorted correctly
+        for i in range(len(logs) - 1):
+            assert logs[i].timestamp >= logs[i + 1].timestamp
+
+    def test_get_logs_handles_index_exception_gracefully(self, log_manager):
+        """Test that get_logs() handles index loading exceptions gracefully."""
+        # Create log entries
+        for i in range(3):
+            entry = LogEntry.create(
+                log_type="scan",
+                status="clean",
+                summary=f"Entry {i}",
+                details="Details",
+            )
+            log_manager.save_log(entry)
+
+        # Mock _load_index to raise an exception
+        original_load = log_manager._load_index
+
+        def mock_load():
+            raise Exception("Index loading error")
+
+        log_manager._load_index = mock_load
+
+        # get_logs() should fall back to full scan
+        logs = log_manager.get_logs()
+
+        # Should still return all logs via fallback
+        assert len(logs) == 3
+
+        # Restore original method
+        log_manager._load_index = original_load
+
+    def test_get_logs_returns_empty_list_with_nonexistent_directory(self, temp_log_dir):
+        """Test that get_logs() returns empty list when directory doesn't exist."""
+        # Create manager, then delete directory
+        log_dir = Path(temp_log_dir) / "nonexistent"
+        manager = LogManager(log_dir=str(log_dir))
+
+        # Delete the directory
+        import shutil
+        if log_dir.exists():
+            shutil.rmtree(log_dir)
+
+        # get_logs() should return empty list
+        logs = manager.get_logs()
+        assert logs == []
+
+    def test_get_logs_consistency_between_index_and_fallback(self, log_manager, temp_log_dir):
+        """Test that get_logs() returns same results with index and fallback."""
+        # Create diverse set of entries
+        entries = []
+        for i in range(15):
+            entry = LogEntry.create(
+                log_type="scan" if i % 3 == 0 else "update",
+                status="clean" if i % 2 == 0 else "infected",
+                summary=f"Entry {i}",
+                details=f"Details {i}",
+            )
+            log_manager.save_log(entry)
+            entries.append(entry)
+
+        # Get logs using index
+        logs_with_index = log_manager.get_logs(limit=10, log_type="scan")
+
+        # Delete index to force fallback
+        index_path = Path(temp_log_dir) / "log_index.json"
+        if index_path.exists():
+            index_path.unlink()
+
+        # Get logs using fallback
+        logs_with_fallback = log_manager.get_logs(limit=10, log_type="scan")
+
+        # Results should be identical
+        assert len(logs_with_index) == len(logs_with_fallback)
+
+        # Compare IDs (order should be same)
+        index_ids = [log.id for log in logs_with_index]
+        fallback_ids = [log.id for log in logs_with_fallback]
+        assert index_ids == fallback_ids
