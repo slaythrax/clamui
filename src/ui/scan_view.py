@@ -145,7 +145,7 @@ class ScanView(Gtk.Box):
             }
 
             .severity-critical {
-                background-color: #e01b24;
+                background-color: @error_bg_color;
                 color: white;
             }
 
