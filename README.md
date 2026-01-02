@@ -82,6 +82,21 @@ clamui
 clamui /path/to/file1 /path/to/folder
 ```
 
+## Configuration
+
+ClamUI stores user preferences in `~/.config/clamui/settings.json` and can be configured through the Preferences dialog or by directly editing the JSON file.
+
+### Key Configuration Options
+
+- **Scan Backend**: Choose between automatic detection, daemon (clamd), or direct clamscan
+- **Notifications**: Control desktop notifications for scan results and updates
+- **Auto-Quarantine**: Automatically quarantine detected threats
+- **Scheduled Scans**: Configure automatic scanning with systemd or cron
+- **System Tray**: Enable start minimized and minimize to tray options
+- **Scan Profiles**: Create custom scan configurations with exclusion patterns
+
+For complete reference including all 15 settings, scan profiles, file locations, and configuration examples, see the [Configuration Reference](./docs/CONFIGURATION.md).
+
 ## Documentation
 
 | Document | Description |

@@ -446,6 +446,7 @@ ClamUI uses GitHub Actions for CI with the following workflows:
 ## See Also
 
 - [README.md](../README.md) - Project overview and quick start
+- [CONFIGURATION.md](./CONFIGURATION.md) - Configuration reference and settings guide
 - [docs/INSTALL.md](./INSTALL.md) - Installation guide
 - [DEBIAN_PACKAGING.md](../DEBIAN_PACKAGING.md) - Debian packaging details
 - [FLATPAK_SUBMISSION.md](../FLATPAK_SUBMISSION.md) - Flathub submission documentation
