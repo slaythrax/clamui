@@ -337,11 +337,10 @@ class ProfileManager:
 
         # Try to parse the path to check for basic validity
         try:
-            # Expand ~ but don't require existence
-            if stripped_path.startswith("~"):
-                expanded = Path(stripped_path).expanduser()
-            else:
-                expanded = Path(stripped_path)
+            # Expand ~ but don't require existence (use cached version)
+            expanded = self._cached_expanduser(stripped_path)
+            if expanded is None:
+                return (False, f"Invalid path format: {stripped_path}")
 
             # Check that the path string is reasonable
             # (Path() can accept almost anything, so we do additional checks)
