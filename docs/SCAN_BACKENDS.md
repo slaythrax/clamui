@@ -109,33 +109,42 @@ See [Daemon Setup Instructions](#daemon-setup) below.
 
 ### Clamscan Backend
 
-**Description**: Uses the standalone `clamscan` command-line tool directly.
+**Description**: Uses the standalone `clamscan` command-line tool directly without requiring any background services.
 
 **How It Works**:
-- Executes the `clamscan` command for each scan operation
-- Loads the virus database from disk at the start of every scan
-- Runs as a standalone process that exits after completing the scan
-- No background services or daemons required
+- Executes the `clamscan` command as a separate process for each scan operation
+- Loads the entire virus database from disk at the start of every scan
+- Scans files using the loaded database, then reports results
+- Process terminates after completing the scan, freeing all resources
+- No background services or daemons required - completely self-contained
 
 **Advantages**:
 - ✅ **No daemon required**: Works out-of-the-box with basic ClamAV installation
-- ✅ **Simpler setup**: Just requires clamscan to be installed
-- ✅ **Lower baseline memory usage**: No resident daemon consuming RAM
-- ✅ **Guaranteed to work**: Most reliable fallback option
-- ✅ **Easier troubleshooting**: Simpler architecture with fewer dependencies
+- ✅ **Simpler setup**: Just requires `clamscan` command to be installed (part of standard ClamAV package)
+- ✅ **Lower baseline memory usage**: No resident daemon consuming RAM (~50MB idle vs 500MB-1GB for daemon)
+- ✅ **Guaranteed to work**: Most reliable fallback option - works on any system with ClamAV installed
+- ✅ **Easier troubleshooting**: Simpler architecture with fewer moving parts and dependencies
+- ✅ **Maximum compatibility**: Works in restricted environments where daemon services cannot run
+- ✅ **Clean resource usage**: Memory is freed immediately after each scan completes
+- ✅ **No service management**: No need to worry about daemon crashes, restarts, or startup configuration
 
 **Disadvantages**:
-- ❌ **Slower startup time**: Must load database from disk for every scan (3-10 seconds)
-- ❌ **Higher disk I/O**: Reads entire database from disk each scan
-- ❌ **No parallel scanning**: Scans files sequentially
-- ❌ **Repeated overhead**: Database loading time repeated for each scan operation
+- ❌ **Slower startup time**: Must load database from disk for every scan (typically 3-10 seconds depending on disk speed)
+- ❌ **Higher disk I/O**: Reads entire virus database (200-400MB) from disk each scan, increasing wear on storage
+- ❌ **No parallel scanning**: Scans files sequentially, cannot take advantage of multi-core processors for scanning
+- ❌ **Repeated overhead**: Database loading time is repeated for each scan operation, even consecutive scans
+- ❌ **Higher total memory during scan**: Loads fresh database copy each time (500MB-1GB during scan)
+- ❌ **Cache unfriendly**: Cannot benefit from filesystem cache as effectively as daemon for frequent scans
 
 **When to Use**:
-- Infrequent, one-off scans
-- Systems where daemon setup is not feasible
-- Testing or troubleshooting when daemon has issues
-- Minimal installations where memory is constrained
-- Fallback when daemon becomes unavailable
+- **Infrequent, one-off scans**: When you only scan occasionally (weekly or less)
+- **Systems where daemon setup is not feasible**: Embedded systems, minimal containers, or restricted environments
+- **Testing or troubleshooting**: When debugging ClamAV issues or verifying scan behavior without daemon complexity
+- **Minimal installations**: When memory is constrained and you can't afford 500MB-1GB for a resident daemon
+- **Fallback scenario**: When daemon becomes unavailable or has configuration issues
+- **Portable installations**: USB-based or portable ClamAV installations without system service access
+- **Shared/multi-user systems**: Where you don't have permissions to configure system services
+- **Battery-conscious mobile setups**: Laptops where you want to minimize background processes when not actively scanning
 
 ---
 
