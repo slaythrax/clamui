@@ -768,6 +768,9 @@ class LogManager:
         """
         Get the total number of stored logs.
 
+        Uses the index for O(1) performance when available. Falls back to
+        directory globbing if the index is missing or corrupted.
+
         Returns:
             Number of log entries
         """
@@ -775,7 +778,20 @@ class LogManager:
             try:
                 if not self._log_dir.exists():
                     return 0
-                return len(list(self._log_dir.glob("*.json")))
+
+                # Try to use index for O(1) performance
+                index_data = self._load_index()
+                if index_data.get("entries"):
+                    # Validate the index
+                    if self._validate_index(index_data):
+                        return len(index_data["entries"])
+
+                # Fallback: count log files directly (excluding index file)
+                log_files = [
+                    f for f in self._log_dir.glob("*.json")
+                    if f.name != INDEX_FILENAME
+                ]
+                return len(log_files)
             except OSError:
                 return 0
 

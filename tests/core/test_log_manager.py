@@ -2883,3 +2883,253 @@ class TestLogManagerAutoMigration:
 
         assert len(index_data["entries"]) == 1
         assert index_data["entries"][0]["id"] == entry.id
+
+
+class TestLogManagerOptimizedGetLogCount:
+    """Tests for optimized get_log_count() using index."""
+
+    @pytest.fixture
+    def temp_log_dir(self):
+        """Create a temporary log directory."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            yield tmpdir
+
+    def test_get_log_count_uses_index(self, temp_log_dir):
+        """Test get_log_count uses index for O(1) performance."""
+        manager = LogManager(log_dir=temp_log_dir)
+
+        # Create some log entries
+        for i in range(5):
+            entry = LogEntry.create(
+                log_type="scan",
+                status="clean",
+                summary=f"Scan {i}",
+                details=f"Details {i}",
+            )
+            manager.save_log(entry)
+
+        # Index should exist now
+        index_path = Path(temp_log_dir) / "log_index.json"
+        assert index_path.exists()
+
+        # get_log_count should use the index
+        count = manager.get_log_count()
+        assert count == 5
+
+        # Verify index was actually used by checking it has correct data
+        with open(index_path, "r", encoding="utf-8") as f:
+            index_data = json.load(f)
+        assert len(index_data["entries"]) == 5
+
+    def test_get_log_count_fallback_without_index(self, temp_log_dir):
+        """Test get_log_count falls back to directory scan without index."""
+        log_dir = Path(temp_log_dir)
+
+        # Create log files directly (bypassing save_log to avoid index creation)
+        for i in range(3):
+            entry = LogEntry.create(
+                log_type="scan",
+                status="clean",
+                summary=f"Scan {i}",
+                details=f"Details {i}",
+            )
+            log_file = log_dir / f"{entry.id}.json"
+            log_dir.mkdir(parents=True, exist_ok=True)
+            with open(log_file, "w", encoding="utf-8") as f:
+                json.dump(entry.to_dict(), f, indent=2)
+
+        # No index should exist
+        index_path = log_dir / "log_index.json"
+        assert not index_path.exists()
+
+        # Create manager and get count - should fall back to directory scan
+        manager = LogManager(log_dir=temp_log_dir)
+        count = manager.get_log_count()
+        assert count == 3
+
+    def test_get_log_count_excludes_index_file(self, temp_log_dir):
+        """Test get_log_count excludes the index file from count."""
+        log_dir = Path(temp_log_dir)
+        log_dir.mkdir(parents=True, exist_ok=True)
+
+        # Create log files directly
+        for i in range(2):
+            entry = LogEntry.create(
+                log_type="scan",
+                status="clean",
+                summary=f"Scan {i}",
+                details=f"Details {i}",
+            )
+            log_file = log_dir / f"{entry.id}.json"
+            with open(log_file, "w", encoding="utf-8") as f:
+                json.dump(entry.to_dict(), f, indent=2)
+
+        # Create an index file manually
+        index_path = log_dir / "log_index.json"
+        with open(index_path, "w", encoding="utf-8") as f:
+            json.dump({"version": 1, "entries": []}, f)
+
+        # Total JSON files = 3 (2 logs + 1 index), but count should be 2
+        json_files = list(log_dir.glob("*.json"))
+        assert len(json_files) == 3
+
+        manager = LogManager(log_dir=temp_log_dir)
+        count = manager.get_log_count()
+        assert count == 2  # Should exclude index file
+
+    def test_get_log_count_with_stale_index(self, temp_log_dir):
+        """Test get_log_count rebuilds stale index and returns correct count."""
+        manager = LogManager(log_dir=temp_log_dir)
+        log_dir = Path(temp_log_dir)
+
+        # Create logs through manager (creates index)
+        entries = []
+        for i in range(3):
+            entry = LogEntry.create(
+                log_type="scan",
+                status="clean",
+                summary=f"Scan {i}",
+                details=f"Details {i}",
+            )
+            manager.save_log(entry)
+            entries.append(entry)
+
+        # Manually delete one log file to make index stale
+        log_file = log_dir / f"{entries[0].id}.json"
+        log_file.unlink()
+
+        # get_log_count should detect stale index and fall back to directory scan
+        count = manager.get_log_count()
+        assert count == 2  # Should count remaining files
+
+    def test_get_log_count_with_corrupted_index(self, temp_log_dir):
+        """Test get_log_count handles corrupted index gracefully."""
+        log_dir = Path(temp_log_dir)
+        log_dir.mkdir(parents=True, exist_ok=True)
+
+        # Create some log files
+        for i in range(3):
+            entry = LogEntry.create(
+                log_type="scan",
+                status="clean",
+                summary=f"Scan {i}",
+                details=f"Details {i}",
+            )
+            log_file = log_dir / f"{entry.id}.json"
+            with open(log_file, "w", encoding="utf-8") as f:
+                json.dump(entry.to_dict(), f, indent=2)
+
+        # Create a corrupted index file
+        index_path = log_dir / "log_index.json"
+        with open(index_path, "w", encoding="utf-8") as f:
+            f.write("{ invalid json")
+
+        # get_log_count should handle corrupted index and fall back
+        manager = LogManager(log_dir=temp_log_dir)
+        count = manager.get_log_count()
+        assert count == 3
+
+    def test_get_log_count_empty_directory(self, temp_log_dir):
+        """Test get_log_count returns 0 for empty directory."""
+        manager = LogManager(log_dir=temp_log_dir)
+        count = manager.get_log_count()
+        assert count == 0
+
+    def test_get_log_count_nonexistent_directory(self, temp_log_dir):
+        """Test get_log_count handles nonexistent directory."""
+        manager = LogManager(log_dir=os.path.join(temp_log_dir, "nonexistent"))
+        # Delete the created directory
+        os.rmdir(manager._log_dir)
+        count = manager.get_log_count()
+        assert count == 0
+
+    def test_get_log_count_with_invalid_index_structure(self, temp_log_dir):
+        """Test get_log_count handles invalid index structure."""
+        log_dir = Path(temp_log_dir)
+        log_dir.mkdir(parents=True, exist_ok=True)
+
+        # Create some log files
+        for i in range(2):
+            entry = LogEntry.create(
+                log_type="scan",
+                status="clean",
+                summary=f"Scan {i}",
+                details=f"Details {i}",
+            )
+            log_file = log_dir / f"{entry.id}.json"
+            with open(log_file, "w", encoding="utf-8") as f:
+                json.dump(entry.to_dict(), f, indent=2)
+
+        # Create an index with invalid structure (missing 'entries' key)
+        index_path = log_dir / "log_index.json"
+        with open(index_path, "w", encoding="utf-8") as f:
+            json.dump({"version": 1}, f)  # Missing 'entries' key
+
+        # get_log_count should handle invalid structure and fall back
+        manager = LogManager(log_dir=temp_log_dir)
+        count = manager.get_log_count()
+        assert count == 2
+
+    def test_get_log_count_large_index(self, temp_log_dir):
+        """Test get_log_count performance with large index."""
+        manager = LogManager(log_dir=temp_log_dir)
+
+        # Create a moderate number of log entries
+        for i in range(20):
+            entry = LogEntry.create(
+                log_type="scan",
+                status="clean",
+                summary=f"Scan {i}",
+                details=f"Details {i}",
+            )
+            manager.save_log(entry)
+
+        # get_log_count should use index efficiently
+        count = manager.get_log_count()
+        assert count == 20
+
+    def test_get_log_count_after_delete(self, temp_log_dir):
+        """Test get_log_count updates correctly after delete_log."""
+        manager = LogManager(log_dir=temp_log_dir)
+
+        # Create logs
+        entries = []
+        for i in range(4):
+            entry = LogEntry.create(
+                log_type="scan",
+                status="clean",
+                summary=f"Scan {i}",
+                details=f"Details {i}",
+            )
+            manager.save_log(entry)
+            entries.append(entry)
+
+        assert manager.get_log_count() == 4
+
+        # Delete one log
+        manager.delete_log(entries[0].id)
+
+        # Count should be updated
+        assert manager.get_log_count() == 3
+
+    def test_get_log_count_after_clear(self, temp_log_dir):
+        """Test get_log_count returns 0 after clear_logs."""
+        manager = LogManager(log_dir=temp_log_dir)
+
+        # Create logs
+        for i in range(3):
+            entry = LogEntry.create(
+                log_type="scan",
+                status="clean",
+                summary=f"Scan {i}",
+                details=f"Details {i}",
+            )
+            manager.save_log(entry)
+
+        assert manager.get_log_count() == 3
+
+        # Clear logs
+        manager.clear_logs()
+
+        # Count should be 0
+        assert manager.get_log_count() == 0
