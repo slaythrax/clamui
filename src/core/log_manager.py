@@ -229,6 +229,9 @@ class LogManager:
         # Thread lock for safe concurrent access
         self._lock = threading.Lock()
 
+        # Flag to track if migration check has been performed
+        self._migration_checked = False
+
         # Ensure log directory exists
         self._ensure_log_dir()
 
@@ -479,6 +482,9 @@ class LogManager:
         triggers automatic rebuild if stale/invalid. Falls back to full directory
         scan if the index is missing or corrupted.
 
+        On first access, automatically rebuilds the index if logs exist but no
+        index is present (migration for existing installations).
+
         Args:
             limit: Maximum number of entries to return
             log_type: Optional filter by type ("scan" or "update")
@@ -487,6 +493,45 @@ class LogManager:
             List of LogEntry objects
         """
         with self._lock:
+            # Perform auto-migration check on first access
+            if not self._migration_checked:
+                self._migration_checked = True
+
+                # Check if index exists
+                if not self._index_path.exists():
+                    # Check if any log files exist
+                    try:
+                        if self._log_dir.exists():
+                            log_files = [
+                                f for f in self._log_dir.glob("*.json")
+                                if f.name != INDEX_FILENAME
+                            ]
+                            # If logs exist but no index, rebuild it
+                            if log_files:
+                                # Inline rebuild (don't call rebuild_index() to avoid re-locking)
+                                entries_list = []
+                                for log_file in log_files:
+                                    try:
+                                        with open(log_file, "r", encoding="utf-8") as f:
+                                            data = json.load(f)
+                                            log_id = data.get("id")
+                                            timestamp = data.get("timestamp")
+                                            log_type_val = data.get("type")
+                                            if log_id and timestamp and log_type_val:
+                                                entries_list.append({
+                                                    "id": log_id,
+                                                    "timestamp": timestamp,
+                                                    "type": log_type_val
+                                                })
+                                    except (OSError, json.JSONDecodeError):
+                                        # Skip corrupted files
+                                        continue
+                                # Save the rebuilt index
+                                self._save_index({"version": 1, "entries": entries_list})
+                    except Exception:
+                        # If migration fails, continue normally - will fall back to full scan
+                        pass
+
             # Try optimized index-based approach first
             index_data = self._load_index()
 

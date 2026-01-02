@@ -2465,3 +2465,421 @@ class TestLogManagerOptimizedGetLogs:
         index_ids = [log.id for log in logs_with_index]
         fallback_ids = [log.id for log in logs_with_fallback]
         assert index_ids == fallback_ids
+
+
+class TestLogManagerAutoMigration:
+    """Tests for auto-migration on first get_logs() access."""
+
+    def test_auto_migration_when_logs_exist_without_index(self, temp_log_dir):
+        """Test that index is automatically created when logs exist but no index."""
+        # Create LogManager
+        manager = LogManager(log_dir=temp_log_dir)
+
+        # Manually create log files without using save_log() (simulates old installation)
+        log_dir = Path(temp_log_dir)
+        log_dir.mkdir(parents=True, exist_ok=True)
+
+        # Create 3 log files
+        entries = []
+        for i in range(3):
+            entry = LogEntry.create(
+                log_type="scan" if i % 2 == 0 else "update",
+                status="clean",
+                summary=f"Entry {i}",
+                details=f"Details {i}",
+            )
+            entries.append(entry)
+
+            # Write directly to file (bypassing save_log to avoid index creation)
+            log_file = log_dir / f"{entry.id}.json"
+            with open(log_file, "w", encoding="utf-8") as f:
+                json.dump(entry.to_dict(), f, indent=2)
+
+        # Verify index doesn't exist yet
+        index_path = log_dir / "log_index.json"
+        assert not index_path.exists()
+
+        # Create a NEW LogManager instance to ensure fresh state
+        manager = LogManager(log_dir=temp_log_dir)
+
+        # First get_logs() call should trigger auto-migration
+        logs = manager.get_logs()
+
+        # Index should now exist
+        assert index_path.exists()
+
+        # Index should contain all entries
+        with open(index_path, "r", encoding="utf-8") as f:
+            index_data = json.load(f)
+
+        assert index_data["version"] == 1
+        assert len(index_data["entries"]) == 3
+
+        # Verify all log IDs are in index
+        index_ids = {entry["id"] for entry in index_data["entries"]}
+        expected_ids = {entry.id for entry in entries}
+        assert index_ids == expected_ids
+
+        # Verify get_logs returns all logs
+        assert len(logs) == 3
+
+    def test_auto_migration_only_happens_once(self, temp_log_dir):
+        """Test that auto-migration check only happens on first get_logs() call."""
+        # Create LogManager
+        manager = LogManager(log_dir=temp_log_dir)
+
+        # Create a log file manually
+        log_dir = Path(temp_log_dir)
+        log_dir.mkdir(parents=True, exist_ok=True)
+
+        entry = LogEntry.create(
+            log_type="scan",
+            status="clean",
+            summary="Entry 1",
+            details="Details 1",
+        )
+        log_file = log_dir / f"{entry.id}.json"
+        with open(log_file, "w", encoding="utf-8") as f:
+            json.dump(entry.to_dict(), f, indent=2)
+
+        # First call triggers migration
+        manager.get_logs()
+
+        # Verify migration flag is set
+        assert manager._migration_checked is True
+
+        # Delete index to test that it's not rebuilt on second call
+        index_path = log_dir / "log_index.json"
+        if index_path.exists():
+            index_path.unlink()
+
+        # Second call should NOT trigger migration (flag is already True)
+        logs = manager.get_logs()
+
+        # Index should still not exist (wasn't rebuilt)
+        assert not index_path.exists()
+
+        # But get_logs should still work (fallback to full scan)
+        assert len(logs) == 1
+
+    def test_no_migration_when_index_already_exists(self, log_manager, temp_log_dir):
+        """Test that no migration happens when index already exists."""
+        # Create a log using save_log (which creates index)
+        entry = LogEntry.create(
+            log_type="scan",
+            status="clean",
+            summary="Entry 1",
+            details="Details 1",
+        )
+        log_manager.save_log(entry)
+
+        # Index should exist
+        index_path = Path(temp_log_dir) / "log_index.json"
+        assert index_path.exists()
+
+        # Get the modification time
+        mtime_before = index_path.stat().st_mtime
+
+        # Wait a tiny bit to ensure mtime would change if file is modified
+        time.sleep(0.01)
+
+        # Create a NEW LogManager instance
+        manager = LogManager(log_dir=temp_log_dir)
+
+        # Call get_logs (should not rebuild index since it exists)
+        logs = manager.get_logs()
+
+        # Index modification time should be unchanged
+        mtime_after = index_path.stat().st_mtime
+        assert mtime_before == mtime_after
+
+        # Migration flag should still be set
+        assert manager._migration_checked is True
+
+        # Logs should be returned correctly
+        assert len(logs) == 1
+
+    def test_no_migration_when_no_logs_exist(self, temp_log_dir):
+        """Test that no migration happens when no log files exist."""
+        # Create LogManager with empty directory
+        manager = LogManager(log_dir=temp_log_dir)
+
+        # Call get_logs on empty directory
+        logs = manager.get_logs()
+
+        # No index should be created (no logs to index)
+        index_path = Path(temp_log_dir) / "log_index.json"
+        assert not index_path.exists()
+
+        # Migration flag should be set
+        assert manager._migration_checked is True
+
+        # Should return empty list
+        assert logs == []
+
+    def test_migration_handles_corrupted_files_gracefully(self, temp_log_dir):
+        """Test that migration skips corrupted log files gracefully."""
+        # Create LogManager
+        manager = LogManager(log_dir=temp_log_dir)
+
+        # Create log directory
+        log_dir = Path(temp_log_dir)
+        log_dir.mkdir(parents=True, exist_ok=True)
+
+        # Create one valid log file
+        entry1 = LogEntry.create(
+            log_type="scan",
+            status="clean",
+            summary="Valid entry",
+            details="Details",
+        )
+        log_file1 = log_dir / f"{entry1.id}.json"
+        with open(log_file1, "w", encoding="utf-8") as f:
+            json.dump(entry1.to_dict(), f, indent=2)
+
+        # Create a corrupted log file
+        corrupted_file = log_dir / "corrupted.json"
+        with open(corrupted_file, "w", encoding="utf-8") as f:
+            f.write("{ invalid json content")
+
+        # Create another valid log file
+        entry2 = LogEntry.create(
+            log_type="update",
+            status="success",
+            summary="Another valid entry",
+            details="Details 2",
+        )
+        log_file2 = log_dir / f"{entry2.id}.json"
+        with open(log_file2, "w", encoding="utf-8") as f:
+            json.dump(entry2.to_dict(), f, indent=2)
+
+        # Create a NEW LogManager instance
+        manager = LogManager(log_dir=temp_log_dir)
+
+        # First get_logs() call should trigger migration and skip corrupted file
+        logs = manager.get_logs()
+
+        # Index should exist
+        index_path = log_dir / "log_index.json"
+        assert index_path.exists()
+
+        # Index should contain only valid entries
+        with open(index_path, "r", encoding="utf-8") as f:
+            index_data = json.load(f)
+
+        assert len(index_data["entries"]) == 2
+
+        # Verify valid log IDs are in index
+        index_ids = {entry["id"] for entry in index_data["entries"]}
+        expected_ids = {entry1.id, entry2.id}
+        assert index_ids == expected_ids
+
+    def test_migration_handles_missing_fields_gracefully(self, temp_log_dir):
+        """Test that migration skips log files with missing required fields."""
+        # Create LogManager
+        manager = LogManager(log_dir=temp_log_dir)
+
+        # Create log directory
+        log_dir = Path(temp_log_dir)
+        log_dir.mkdir(parents=True, exist_ok=True)
+
+        # Create one valid log file
+        entry1 = LogEntry.create(
+            log_type="scan",
+            status="clean",
+            summary="Valid entry",
+            details="Details",
+        )
+        log_file1 = log_dir / f"{entry1.id}.json"
+        with open(log_file1, "w", encoding="utf-8") as f:
+            json.dump(entry1.to_dict(), f, indent=2)
+
+        # Create a log file missing the 'type' field
+        incomplete_file = log_dir / "incomplete.json"
+        with open(incomplete_file, "w", encoding="utf-8") as f:
+            json.dump({
+                "id": "incomplete-id",
+                "timestamp": "2024-01-15T10:00:00",
+                # Missing 'type' field
+                "status": "clean",
+                "summary": "Incomplete",
+                "details": "Missing type field",
+            }, f, indent=2)
+
+        # Create a NEW LogManager instance
+        manager = LogManager(log_dir=temp_log_dir)
+
+        # First get_logs() call should trigger migration and skip incomplete file
+        logs = manager.get_logs()
+
+        # Index should exist
+        index_path = log_dir / "log_index.json"
+        assert index_path.exists()
+
+        # Index should contain only the valid entry
+        with open(index_path, "r", encoding="utf-8") as f:
+            index_data = json.load(f)
+
+        assert len(index_data["entries"]) == 1
+        assert index_data["entries"][0]["id"] == entry1.id
+
+    def test_migration_failure_does_not_break_get_logs(self, temp_log_dir):
+        """Test that get_logs() still works even if migration fails."""
+        # Create LogManager
+        manager = LogManager(log_dir=temp_log_dir)
+
+        # Create a valid log file
+        log_dir = Path(temp_log_dir)
+        log_dir.mkdir(parents=True, exist_ok=True)
+
+        entry = LogEntry.create(
+            log_type="scan",
+            status="clean",
+            summary="Entry 1",
+            details="Details 1",
+        )
+        log_file = log_dir / f"{entry.id}.json"
+        with open(log_file, "w", encoding="utf-8") as f:
+            json.dump(entry.to_dict(), f, indent=2)
+
+        # Create a NEW LogManager instance
+        manager = LogManager(log_dir=temp_log_dir)
+
+        # Mock _save_index to fail (simulates permission error during migration)
+        original_save = manager._save_index
+
+        def mock_save(index_data):
+            return False  # Simulate failure
+
+        manager._save_index = mock_save
+
+        # get_logs() should still work via fallback, despite migration failure
+        logs = manager.get_logs()
+
+        # Should still return the log via fallback
+        assert len(logs) == 1
+        assert logs[0].id == entry.id
+
+        # Migration flag should still be set (migration was attempted)
+        assert manager._migration_checked is True
+
+        # Restore original method
+        manager._save_index = original_save
+
+    def test_migration_with_nonexistent_directory(self, temp_log_dir):
+        """Test that migration handles nonexistent directory gracefully."""
+        # Create a path that doesn't exist
+        log_dir = Path(temp_log_dir) / "nonexistent"
+
+        # Create LogManager (directory won't exist yet)
+        manager = LogManager(log_dir=str(log_dir))
+
+        # Call get_logs (should handle gracefully)
+        logs = manager.get_logs()
+
+        # Migration flag should be set
+        assert manager._migration_checked is True
+
+        # Should return empty list
+        assert logs == []
+
+        # No index should be created
+        index_path = log_dir / "log_index.json"
+        assert not index_path.exists()
+
+    def test_migration_creates_index_with_correct_structure(self, temp_log_dir):
+        """Test that migration creates index with correct structure."""
+        # Create LogManager
+        manager = LogManager(log_dir=temp_log_dir)
+
+        # Create log directory and files manually
+        log_dir = Path(temp_log_dir)
+        log_dir.mkdir(parents=True, exist_ok=True)
+
+        # Create log files with specific data
+        entries = []
+        for i in range(3):
+            entry = LogEntry.create(
+                log_type="scan" if i % 2 == 0 else "update",
+                status="clean",
+                summary=f"Entry {i}",
+                details=f"Details {i}",
+            )
+            entries.append(entry)
+
+            log_file = log_dir / f"{entry.id}.json"
+            with open(log_file, "w", encoding="utf-8") as f:
+                json.dump(entry.to_dict(), f, indent=2)
+
+        # Create a NEW LogManager instance
+        manager = LogManager(log_dir=temp_log_dir)
+
+        # Trigger migration
+        manager.get_logs()
+
+        # Verify index structure
+        index_path = log_dir / "log_index.json"
+        assert index_path.exists()
+
+        with open(index_path, "r", encoding="utf-8") as f:
+            index_data = json.load(f)
+
+        # Verify structure
+        assert "version" in index_data
+        assert "entries" in index_data
+        assert index_data["version"] == 1
+        assert isinstance(index_data["entries"], list)
+        assert len(index_data["entries"]) == 3
+
+        # Verify each entry has required fields
+        for entry in index_data["entries"]:
+            assert "id" in entry
+            assert "timestamp" in entry
+            assert "type" in entry
+            assert len(entry) == 3  # Only these 3 fields
+
+    def test_migration_skips_index_file_itself(self, temp_log_dir):
+        """Test that migration doesn't try to process the index file as a log."""
+        # Create LogManager
+        manager = LogManager(log_dir=temp_log_dir)
+
+        # Create log directory
+        log_dir = Path(temp_log_dir)
+        log_dir.mkdir(parents=True, exist_ok=True)
+
+        # Create a valid log file
+        entry = LogEntry.create(
+            log_type="scan",
+            status="clean",
+            summary="Entry 1",
+            details="Details 1",
+        )
+        log_file = log_dir / f"{entry.id}.json"
+        with open(log_file, "w", encoding="utf-8") as f:
+            json.dump(entry.to_dict(), f, indent=2)
+
+        # Create a fake existing index file (to simulate edge case)
+        index_path = log_dir / "log_index.json"
+        with open(index_path, "w", encoding="utf-8") as f:
+            json.dump({
+                "version": 1,
+                "entries": [{"id": "fake", "timestamp": "2024-01-01T00:00:00", "type": "scan"}]
+            }, f)
+
+        # Now delete it to force migration
+        index_path.unlink()
+
+        # Create a NEW LogManager instance
+        manager = LogManager(log_dir=temp_log_dir)
+
+        # Trigger migration
+        logs = manager.get_logs()
+
+        # Index should be created and contain only the actual log entry
+        assert index_path.exists()
+
+        with open(index_path, "r", encoding="utf-8") as f:
+            index_data = json.load(f)
+
+        assert len(index_data["entries"]) == 1
+        assert index_data["entries"][0]["id"] == entry.id
