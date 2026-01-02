@@ -9,8 +9,9 @@ batch operations and UI updates that make multiple quick queries.
 import queue
 import sqlite3
 import threading
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Optional
+from typing import Generator, Optional
 
 
 class ConnectionPool:
@@ -145,3 +146,45 @@ class ConnectionPool:
             # Decrement total connections count since we're discarding this one
             with self._lock:
                 self._total_connections -= 1
+
+    @contextmanager
+    def get_connection(self, timeout: Optional[float] = None) -> Generator[sqlite3.Connection, None, None]:
+        """
+        Context manager that acquires and releases a connection automatically.
+
+        Provides the same interface as QuarantineDatabase._get_connection() for
+        easy integration. Acquires a connection on entry, commits transactions
+        on normal exit, and ensures the connection is released even on exceptions.
+
+        Args:
+            timeout: Maximum time in seconds to wait for a connection.
+                    None means wait indefinitely (default).
+
+        Yields:
+            A configured SQLite connection from the pool
+
+        Raises:
+            queue.Empty: If timeout expires while waiting for a connection
+            RuntimeError: If the pool has been closed
+
+        Example:
+            >>> pool = ConnectionPool("path/to/db.sqlite")
+            >>> with pool.get_connection() as conn:
+            ...     conn.execute("INSERT INTO table VALUES (?)", (value,))
+        """
+        conn = self.acquire(timeout=timeout)
+        try:
+            yield conn
+            # Commit transaction on normal exit
+            conn.commit()
+        except Exception:
+            # Rollback transaction on exception
+            try:
+                conn.rollback()
+            except sqlite3.Error:
+                # Ignore rollback errors - connection may be invalid
+                pass
+            raise
+        finally:
+            # Always release connection back to pool
+            self.release(conn)
