@@ -4,6 +4,7 @@ Profile manager module for ClamUI providing scan profile lifecycle management.
 Centralizes all profile operations including CRUD, validation, and import/export.
 """
 
+import functools
 import json
 import os
 import tempfile
@@ -157,6 +158,47 @@ class ProfileManager:
     def _get_timestamp(self) -> str:
         """Get current timestamp in ISO 8601 format."""
         return datetime.now(timezone.utc).isoformat()
+
+    @staticmethod
+    @functools.lru_cache(maxsize=128)
+    def _cached_expanduser(path_str: str) -> Optional[Path]:
+        """
+        Cache-enabled path expansion for home directory.
+
+        Uses LRU cache to avoid redundant expanduser() calls during validation.
+        Thread-safe and handles exceptions gracefully.
+
+        Args:
+            path_str: Path string to expand (e.g., "~/Documents")
+
+        Returns:
+            Expanded Path object, or None if expansion fails
+        """
+        try:
+            return Path(path_str).expanduser()
+        except (OSError, RuntimeError, ValueError):
+            return None
+
+    @staticmethod
+    @functools.lru_cache(maxsize=128)
+    def _cached_resolve(path_str: str) -> Optional[Path]:
+        """
+        Cache-enabled path resolution to absolute canonical path.
+
+        Uses LRU cache to avoid redundant resolve() syscalls during validation.
+        Resolves symlinks and returns absolute path. Thread-safe and handles
+        exceptions gracefully.
+
+        Args:
+            path_str: Path string to resolve
+
+        Returns:
+            Resolved Path object, or None if resolution fails
+        """
+        try:
+            return Path(path_str).resolve()
+        except (OSError, RuntimeError, ValueError):
+            return None
 
     def _validate_name(
         self, name: str, exclude_id: Optional[str] = None
