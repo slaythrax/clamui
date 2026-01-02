@@ -150,6 +150,104 @@ sequenceDiagram
     deactivate Subprocess
 ```
 
+## Complete IPC Flow
+
+This diagram shows the full lifecycle of the tray subprocess, including startup handshake, various command types, menu actions, and shutdown:
+
+```mermaid
+sequenceDiagram
+    participant App as ClamUIApp
+    participant TrayMgr as TrayManager
+    participant Pipe as stdin/stdout
+    participant TrayService as TrayService
+    participant User as User
+
+    Note over App,TrayService: 1. Startup & Handshake
+    App->>TrayMgr: start()
+    TrayMgr->>TrayService: spawn subprocess.Popen()
+    activate TrayService
+    TrayService->>TrayService: Initialize GTK3<br/>Create AppIndicator<br/>Build menu
+    TrayService-->>Pipe: {"event": "ready"}
+    Pipe-->>TrayMgr: ready event
+    TrayMgr->>TrayMgr: _ready = True
+    TrayMgr-->>App: Tray ready
+
+    Note over App,TrayService: 2. Command Flow - Status Updates
+    App->>TrayMgr: update_status("scanning")
+    TrayMgr->>Pipe: {"action": "update_status", "status": "scanning"}
+    Pipe->>TrayService: command
+    TrayService->>TrayService: Change icon to scanning
+    TrayService->>TrayService: Update tooltip
+
+    Note over App,TrayService: 3. Command Flow - Progress Updates
+    App->>TrayMgr: update_progress(45)
+    TrayMgr->>Pipe: {"action": "update_progress", "percentage": 45}
+    Pipe->>TrayService: command
+    TrayService->>TrayService: Update menu label:<br/>"Scanning... 45%"
+
+    App->>TrayMgr: update_progress(100)
+    TrayMgr->>Pipe: {"action": "update_progress", "percentage": 100}
+    Pipe->>TrayService: command
+    TrayService->>TrayService: Update menu label:<br/>"Scanning... 100%"
+
+    App->>TrayMgr: update_progress(0)
+    TrayMgr->>Pipe: {"action": "update_progress", "percentage": 0}
+    Pipe->>TrayService: command
+    TrayService->>TrayService: Clear progress
+
+    Note over App,TrayService: 4. Command Flow - Profile Updates
+    App->>TrayMgr: update_profiles([profiles], current_id)
+    TrayMgr->>Pipe: {"action": "update_profiles",<br/>"profiles": [...], "current_profile_id": "..."}
+    Pipe->>TrayService: command
+    TrayService->>TrayService: Rebuild profiles submenu<br/>Mark current profile
+
+    Note over App,TrayService: 5. Menu Action Events - Quick Scan
+    User->>TrayService: Click "Quick Scan"
+    TrayService-->>Pipe: {"event": "menu_action", "action": "quick_scan"}
+    Pipe-->>TrayMgr: menu_action event
+    TrayMgr->>App: GLib.idle_add(on_quick_scan)
+    App->>App: Start quick scan
+
+    Note over App,TrayService: 6. Menu Action Events - Profile Selection
+    User->>TrayService: Click profile menu item
+    TrayService-->>Pipe: {"event": "menu_action",<br/>"action": "select_profile",<br/>"profile_id": "custom-profile-1"}
+    Pipe-->>TrayMgr: menu_action event
+    TrayMgr->>App: GLib.idle_add(on_profile_select, profile_id)
+    App->>App: Switch to profile<br/>Update UI
+
+    Note over App,TrayService: 7. Menu Action Events - Toggle Window
+    User->>TrayService: Click "Show/Hide Window"
+    TrayService-->>Pipe: {"event": "menu_action", "action": "toggle_window"}
+    Pipe-->>TrayMgr: menu_action event
+    TrayMgr->>App: GLib.idle_add(on_toggle_window)
+    App->>App: Show or hide main window
+    App->>TrayMgr: update_window_visible(True)
+    TrayMgr->>Pipe: {"action": "update_window_visible", "visible": true}
+    Pipe->>TrayService: command
+    TrayService->>TrayService: Update menu label:<br/>"Hide Window"
+
+    Note over App,TrayService: 8. Menu Action Events - Update Database
+    User->>TrayService: Click "Update Virus Database"
+    TrayService-->>Pipe: {"event": "menu_action", "action": "update"}
+    Pipe-->>TrayMgr: menu_action event
+    TrayMgr->>App: GLib.idle_add(on_update)
+    App->>App: Start freshclam update
+
+    Note over App,TrayService: 9. Shutdown Flow
+    User->>TrayService: Click "Quit"
+    TrayService-->>Pipe: {"event": "menu_action", "action": "quit"}
+    Pipe-->>TrayMgr: menu_action event
+    TrayMgr->>App: GLib.idle_add(on_quit)
+    App->>App: do_shutdown()
+    App->>TrayMgr: stop()
+    TrayMgr->>Pipe: {"action": "quit"}
+    Pipe->>TrayService: command
+    TrayService->>TrayService: Gtk.main_quit()
+    deactivate TrayService
+    TrayMgr->>TrayMgr: Wait up to 2s for exit
+    TrayMgr->>TrayMgr: Cleanup pipes and threads
+```
+
 ### Thread Safety
 
 Both processes use **GLib.idle_add()** to ensure GTK operations happen on the correct main thread:
