@@ -87,6 +87,7 @@ clamui /path/to/file1 /path/to/folder
 | Document | Description |
 |----------|-------------|
 | [Installation Guide](./docs/INSTALL.md) | Flatpak, .deb, context menu, and tray setup |
+| [Troubleshooting Guide](./docs/TROUBLESHOOTING.md) | Common issues and solutions |
 | [Development Guide](./docs/DEVELOPMENT.md) | Dev environment, testing, and contributing |
 | [Debian Packaging](./DEBIAN_PACKAGING.md) | Building .deb packages |
 | [Flatpak Submission](./FLATPAK_SUBMISSION.md) | Flathub submission guide |
