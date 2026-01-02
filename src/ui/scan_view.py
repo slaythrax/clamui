@@ -160,7 +160,7 @@ class ScanView(Gtk.Box):
             }
 
             .severity-low {
-                background-color: #3584e4;
+                background-color: @accent_bg_color;
                 color: white;
             }
 
