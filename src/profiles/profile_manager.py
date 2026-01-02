@@ -4,6 +4,7 @@ Profile manager module for ClamUI providing scan profile lifecycle management.
 Centralizes all profile operations including CRUD, validation, and import/export.
 """
 
+import functools
 import json
 import os
 import tempfile
@@ -158,6 +159,125 @@ class ProfileManager:
         """Get current timestamp in ISO 8601 format."""
         return datetime.now(timezone.utc).isoformat()
 
+    @staticmethod
+    @functools.lru_cache(maxsize=128)
+    def _cached_expanduser(path_str: str) -> Optional[Path]:
+        """
+        Cache-enabled path expansion for home directory.
+
+        Uses LRU cache to avoid redundant expanduser() calls during validation.
+        Thread-safe and handles exceptions gracefully.
+
+        Args:
+            path_str: Path string to expand (e.g., "~/Documents")
+
+        Returns:
+            Expanded Path object, or None if expansion fails
+        """
+        try:
+            return Path(path_str).expanduser()
+        except (OSError, RuntimeError, ValueError):
+            return None
+
+    @staticmethod
+    @functools.lru_cache(maxsize=128)
+    def _cached_resolve(path_str: str) -> Optional[Path]:
+        """
+        Cache-enabled path resolution to absolute canonical path.
+
+        Uses LRU cache to avoid redundant resolve() syscalls during validation.
+        Resolves symlinks and returns absolute path. Thread-safe and handles
+        exceptions gracefully.
+
+        Args:
+            path_str: Path string to resolve
+
+        Returns:
+            Resolved Path object, or None if resolution fails
+        """
+        try:
+            return Path(path_str).resolve()
+        except (OSError, RuntimeError, ValueError):
+            return None
+
+    @classmethod
+    def clear_path_cache(cls) -> None:
+        """
+        Clear all path resolution caches.
+
+        Clears the LRU caches for both _cached_expanduser() and _cached_resolve().
+        This should be called when external filesystem changes occur that might
+        affect path resolution results (e.g., symlinks changed, directories moved).
+
+        Cache Lifecycle:
+            - Caches are populated on first access during profile validation
+            - Caches persist across multiple profile operations for performance
+            - Caches should be cleared when filesystem state changes externally
+            - Each cache holds up to 128 entries (LRU eviction policy)
+
+        Thread Safety:
+            This method is thread-safe. The underlying LRU cache implementations
+            use locks internally for cache_clear() operations.
+
+        Examples:
+            >>> ProfileManager.clear_path_cache()  # Clear all caches
+        """
+        cls._cached_expanduser.cache_clear()
+        cls._cached_resolve.cache_clear()
+
+    @classmethod
+    def get_cache_info(cls) -> dict[str, dict[str, int]]:
+        """
+        Get cache statistics for debugging and monitoring.
+
+        Returns cache information for both _cached_expanduser() and
+        _cached_resolve() methods. Useful for performance analysis and
+        debugging cache behavior during validation.
+
+        Returns:
+            Dictionary with cache statistics for each cached method:
+            {
+                "expanduser": {
+                    "hits": int,      # Number of cache hits
+                    "misses": int,    # Number of cache misses
+                    "maxsize": int,   # Maximum cache size
+                    "currsize": int   # Current cache size
+                },
+                "resolve": {
+                    "hits": int,
+                    "misses": int,
+                    "maxsize": int,
+                    "currsize": int
+                }
+            }
+
+        Thread Safety:
+            This method is thread-safe. The underlying cache_info() calls
+            are atomic snapshots of cache state.
+
+        Examples:
+            >>> info = ProfileManager.get_cache_info()
+            >>> print(f"Expanduser cache hits: {info['expanduser']['hits']}")
+            >>> print(f"Resolve cache hit rate: {info['resolve']['hits'] / (info['resolve']['hits'] + info['resolve']['misses'])}")
+        """
+        expanduser_info = cls._cached_expanduser.cache_info()
+        resolve_info = cls._cached_resolve.cache_info()
+
+        return {
+            "expanduser": {
+                "hits": expanduser_info.hits,
+                "misses": expanduser_info.misses,
+                "maxsize": expanduser_info.maxsize,
+                "currsize": expanduser_info.currsize,
+            },
+            "resolve": {
+                "hits": resolve_info.hits,
+                "misses": resolve_info.misses,
+                "maxsize": resolve_info.maxsize,
+                "currsize": resolve_info.currsize,
+            },
+        }
+
     def _validate_name(
         self, name: str, exclude_id: Optional[str] = None
     ) -> None:
@@ -217,11 +337,10 @@ class ProfileManager:
 
         # Try to parse the path to check for basic validity
         try:
-            # Expand ~ but don't require existence
-            if stripped_path.startswith("~"):
-                expanded = Path(stripped_path).expanduser()
-            else:
-                expanded = Path(stripped_path)
+            # Expand ~ but don't require existence (use cached version)
+            expanded = self._cached_expanduser(stripped_path)
+            if expanded is None:
+                return (False, f"Invalid path format: {stripped_path}")
 
             # Check that the path string is reasonable
             # (Path() can accept almost anything, so we do additional checks)
@@ -354,32 +473,47 @@ class ProfileManager:
             return
 
         for exclusion in exclusion_paths:
-            # Normalize the exclusion path
-            try:
-                if exclusion.startswith("~"):
-                    excl_path = Path(exclusion).expanduser().resolve()
-                else:
-                    excl_path = Path(exclusion).resolve()
-            except (OSError, RuntimeError, ValueError):
-                continue
+            # Normalize the exclusion path using cached methods
+            if exclusion.startswith("~"):
+                # First expand ~, then resolve
+                expanded = self._cached_expanduser(exclusion)
+                if expanded is None:
+                    continue
+                excl_path = self._cached_resolve(str(expanded))
+                if excl_path is None:
+                    continue
+            else:
+                # Just resolve
+                excl_path = self._cached_resolve(exclusion)
+                if excl_path is None:
+                    continue
 
             # Check if all targets are children of this exclusion
             all_excluded = True
             for target in targets:
-                try:
-                    if target.startswith("~"):
-                        target_path = Path(target).expanduser().resolve()
-                    else:
-                        target_path = Path(target).resolve()
-
-                    # Check if target is the same as or is a child of exclusion
-                    if not (
-                        target_path == excl_path
-                        or self._is_subpath(target_path, excl_path)
-                    ):
+                # Normalize the target path using cached methods
+                if target.startswith("~"):
+                    # First expand ~, then resolve
+                    expanded = self._cached_expanduser(target)
+                    if expanded is None:
                         all_excluded = False
                         break
-                except (OSError, RuntimeError, ValueError):
+                    target_path = self._cached_resolve(str(expanded))
+                    if target_path is None:
+                        all_excluded = False
+                        break
+                else:
+                    # Just resolve
+                    target_path = self._cached_resolve(target)
+                    if target_path is None:
+                        all_excluded = False
+                        break
+
+                # Check if target is the same as or is a child of exclusion
+                if not (
+                    target_path == excl_path
+                    or self._is_subpath(target_path, excl_path)
+                ):
                     all_excluded = False
                     break
 
