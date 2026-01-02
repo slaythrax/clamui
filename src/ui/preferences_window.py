@@ -691,7 +691,11 @@ class PreferencesWindow(Adw.PreferencesWindow):
 
         group = Adw.PreferencesGroup()
         group.set_title("Scan Backend")
-        group.set_description("Choose how ClamUI performs virus scans")
+        group.set_description(
+            "Choose how ClamUI communicates with ClamAV to perform virus scans. "
+            "The backend affects scan speed, memory usage, and setup requirements. "
+            "Auto mode (recommended) intelligently selects the best available backend."
+        )
 
         # Scan backend dropdown
         backend_row = Adw.ComboRow()
@@ -701,12 +705,14 @@ class PreferencesWindow(Adw.PreferencesWindow):
         backend_model.append("Standalone Scanner (clamscan)")
         backend_row.set_model(backend_model)
         backend_row.set_title("Scan Backend")
-        backend_row.set_subtitle("Select the scanning method")
 
         # Set current selection from settings
         current_backend = self._settings_manager.get("scan_backend", "auto")
         backend_map = {"auto": 0, "daemon": 1, "clamscan": 2}
         backend_row.set_selected(backend_map.get(current_backend, 0))
+
+        # Set initial subtitle based on current selection
+        self._update_backend_subtitle(backend_row, backend_map.get(current_backend, 0))
 
         # Connect to selection changes
         backend_row.connect("notify::selected", self._on_backend_changed)
@@ -721,11 +727,15 @@ class PreferencesWindow(Adw.PreferencesWindow):
         # Check daemon connection
         is_connected, message = check_clamd_connection()
         if is_connected:
-            status_row.set_subtitle("Connected to clamd")
+            status_row.set_subtitle(
+                "✓ Daemon is running and accessible — Auto mode will use daemon for faster scans"
+            )
             status_icon = Gtk.Image.new_from_icon_name("emblem-ok-symbolic")
             status_icon.add_css_class("success")
         else:
-            status_row.set_subtitle(f"Not available: {message}")
+            status_row.set_subtitle(
+                f"⚠ Daemon not available ({message}) — Auto mode will use clamscan backend"
+            )
             status_icon = Gtk.Image.new_from_icon_name("dialog-warning-symbolic")
             status_icon.add_css_class("warning")
 
@@ -743,12 +753,30 @@ class PreferencesWindow(Adw.PreferencesWindow):
 
         page.add(group)
 
+    def _update_backend_subtitle(self, row: Adw.ComboRow, selected: int):
+        """
+        Update the backend row subtitle based on the selected backend.
+
+        Args:
+            row: The ComboRow widget to update
+            selected: Index of the selected backend (0=auto, 1=daemon, 2=clamscan)
+        """
+        subtitles = {
+            0: "Recommended — Automatically uses daemon if available, falls back to clamscan for reliability",
+            1: "Fastest — Instant startup with in-memory database, requires clamd service running",
+            2: "Most compatible — Works anywhere, loads database each scan (3-10 sec startup)"
+        }
+        row.set_subtitle(subtitles.get(selected, subtitles[0]))
+
     def _on_backend_changed(self, row: Adw.ComboRow, _pspec):
         """Handle scan backend selection change."""
         backend_reverse_map = {0: "auto", 1: "daemon", 2: "clamscan"}
         selected = row.get_selected()
         backend = backend_reverse_map.get(selected, "auto")
         self._settings_manager.set("scan_backend", backend)
+
+        # Update subtitle to reflect the selected backend's characteristics
+        self._update_backend_subtitle(row, selected)
 
     def _on_refresh_daemon_status(self, button: Gtk.Button):
         """Refresh the daemon connection status."""
@@ -758,7 +786,9 @@ class PreferencesWindow(Adw.PreferencesWindow):
 
         # Update status row
         if is_connected:
-            self._daemon_status_row.set_subtitle("Connected to clamd")
+            self._daemon_status_row.set_subtitle(
+                "✓ Daemon is running and accessible — Auto mode will use daemon for faster scans"
+            )
             # Update icon
             for child in list(self._daemon_status_row):
                 if isinstance(child, Gtk.Image):
@@ -767,7 +797,9 @@ class PreferencesWindow(Adw.PreferencesWindow):
                     child.add_css_class("success")
                     break
         else:
-            self._daemon_status_row.set_subtitle(f"Not available: {message}")
+            self._daemon_status_row.set_subtitle(
+                f"⚠ Daemon not available ({message}) — Auto mode will use clamscan backend"
+            )
             for child in list(self._daemon_status_row):
                 if isinstance(child, Gtk.Image):
                     child.set_from_icon_name("dialog-warning-symbolic")
