@@ -37,6 +37,7 @@ class QuarantineStatus(Enum):
     ALREADY_QUARANTINED = "already_quarantined"
     ENTRY_NOT_FOUND = "entry_not_found"
     RESTORE_DESTINATION_EXISTS = "restore_destination_exists"
+    INVALID_RESTORE_PATH = "invalid_restore_path"
     ERROR = "error"
 
 
