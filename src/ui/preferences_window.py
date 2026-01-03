@@ -1660,7 +1660,9 @@ class PreferencesWindow(Adw.PreferencesWindow):
         if freshclam_updates:
             is_valid, errors = validate_config(self._freshclam_config)
             if not is_valid:
-                self._show_error_dialog("Validation Error", errors)
+                # Convert list of errors to a single string for display
+                error_message = "\n".join(errors)
+                self._show_error_dialog("Validation Error", error_message)
                 self._is_saving = False
                 button.set_sensitive(True)
                 return
@@ -1668,7 +1670,9 @@ class PreferencesWindow(Adw.PreferencesWindow):
         if clamd_updates and self._clamd_available:
             is_valid, errors = validate_config(self._clamd_config)
             if not is_valid:
-                self._show_error_dialog("Validation Error", errors)
+                # Convert list of errors to a single string for display
+                error_message = "\n".join(errors)
+                self._show_error_dialog("Validation Error", error_message)
                 self._is_saving = False
                 button.set_sensitive(True)
                 return
