@@ -1763,6 +1763,74 @@ class PreferencesWindow(Adw.PreferencesWindow):
 
         return updates
 
+    def _collect_onaccess_data(self) -> dict:
+        """
+        Collect On-Access scanning configuration data from form widgets.
+
+        Returns:
+            Dictionary of configuration key-value pairs to save
+        """
+        if not self._clamd_available:
+            return {}
+
+        updates = {}
+
+        # Collect path settings (comma-separated entries become multiple values)
+        include_path = self._onaccess_widgets['OnAccessIncludePath'].get_text().strip()
+        if include_path:
+            # Split comma-separated paths and store as list for multi-value config
+            updates['OnAccessIncludePath'] = [
+                p.strip() for p in include_path.split(',') if p.strip()
+            ]
+
+        exclude_path = self._onaccess_widgets['OnAccessExcludePath'].get_text().strip()
+        if exclude_path:
+            updates['OnAccessExcludePath'] = [
+                p.strip() for p in exclude_path.split(',') if p.strip()
+            ]
+
+        # Collect behavior switches
+        updates['OnAccessPrevention'] = (
+            'yes' if self._onaccess_widgets['OnAccessPrevention'].get_active() else 'no'
+        )
+        updates['OnAccessExtraScanning'] = (
+            'yes' if self._onaccess_widgets['OnAccessExtraScanning'].get_active() else 'no'
+        )
+        updates['OnAccessDenyOnError'] = (
+            'yes' if self._onaccess_widgets['OnAccessDenyOnError'].get_active() else 'no'
+        )
+        updates['OnAccessDisableDDD'] = (
+            'yes' if self._onaccess_widgets['OnAccessDisableDDD'].get_active() else 'no'
+        )
+
+        # Collect performance settings (spin rows)
+        updates['OnAccessMaxThreads'] = str(
+            int(self._onaccess_widgets['OnAccessMaxThreads'].get_value())
+        )
+        updates['OnAccessMaxFileSize'] = str(
+            int(self._onaccess_widgets['OnAccessMaxFileSize'].get_value())
+        )
+        updates['OnAccessCurlTimeout'] = str(
+            int(self._onaccess_widgets['OnAccessCurlTimeout'].get_value())
+        )
+        updates['OnAccessRetryAttempts'] = str(
+            int(self._onaccess_widgets['OnAccessRetryAttempts'].get_value())
+        )
+
+        # Collect user exclusion settings
+        exclude_uname = self._onaccess_widgets['OnAccessExcludeUname'].get_text().strip()
+        if exclude_uname:
+            updates['OnAccessExcludeUname'] = exclude_uname
+
+        updates['OnAccessExcludeUID'] = str(
+            int(self._onaccess_widgets['OnAccessExcludeUID'].get_value())
+        )
+        updates['OnAccessExcludeRootUID'] = (
+            'yes' if self._onaccess_widgets['OnAccessExcludeRootUID'].get_active() else 'no'
+        )
+
+        return updates
+
     def _collect_scheduled_data(self) -> dict:
         """
         Collect scheduled scan configuration from form widgets.
