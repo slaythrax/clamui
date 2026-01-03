@@ -4,13 +4,12 @@ Preferences window for ClamUI with ClamAV configuration settings.
 """
 
 import threading
-import time
 from pathlib import Path
 
 import gi
 gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
-from gi.repository import Gtk, Adw, Gio, GLib
+from gi.repository import Gtk, Adw, GLib
 
 from src.core.clamav_config import (
     parse_config,
@@ -103,6 +102,7 @@ class PreferencesWindow(Adw.PreferencesWindow):
         self._freshclam_widgets = {}
         self._clamd_widgets = {}
         self._scheduled_widgets = {}
+        self._onaccess_widgets = {}
 
         # Track if clamd.conf exists
         self._clamd_available = False
@@ -143,6 +143,9 @@ class PreferencesWindow(Adw.PreferencesWindow):
 
         # Create Scheduled Scans page
         self._create_scheduled_scans_page()
+
+        # Create On-Access Scanning page (clamd.conf on-access settings)
+        self._create_onaccess_page()
 
         # Create Exclusions page (scan exclusion patterns)
         self._create_exclusions_page()
@@ -869,6 +872,277 @@ class PreferencesWindow(Adw.PreferencesWindow):
             dialog.set_default_response("ok")
             dialog.present(self)
 
+    def _create_onaccess_page(self):
+        """
+        Create the On Access configuration page for clamd.conf settings.
+
+        Allows users to configure ClamAV's real-time file monitoring (clamonacc)
+        including:
+        - Include/exclude paths for monitoring
+        - Prevention mode to block access to infected files
+        - Performance settings (max threads, file size, timeouts)
+        - Exclusions to prevent scan loops
+        """
+        page = Adw.PreferencesPage()
+        page.set_title("On Access")
+        page.set_icon_name("security-high-symbolic")
+
+        if self._clamd_available:
+            # Create On-Access paths group
+            self._create_onaccess_paths_group(page)
+
+            # Create behavior settings group
+            self._create_onaccess_behavior_group(page)
+
+            # Create performance settings group
+            self._create_onaccess_performance_group(page)
+
+            # Create exclusions group (required to prevent scan loops)
+            self._create_onaccess_exclusions_group(page)
+        else:
+            # Show message that clamd.conf is not available
+            group = Adw.PreferencesGroup()
+            group.set_title("Configuration Status")
+            row = Adw.ActionRow()
+            row.set_title("On Access Configuration")
+            row.set_subtitle("clamd.conf not found - On Access settings unavailable")
+            group.add(row)
+            page.add(group)
+
+        self.add(page)
+
+    def _create_onaccess_paths_group(self, page: Adw.PreferencesPage):
+        """
+        Create the On-Access Paths preferences group.
+
+        Contains settings for:
+        - OnAccessIncludePath: Directories to monitor for file access
+        - OnAccessExcludePath: Directories to exclude from monitoring
+
+        Args:
+            page: The preferences page to add the group to
+        """
+        group = Adw.PreferencesGroup()
+        group.set_title("Monitored Paths")
+        group.set_description(
+            "Configure which directories to monitor for real-time scanning. "
+            "Use comma-separated paths for multiple entries."
+        )
+        group.set_header_suffix(self._create_permission_indicator())
+
+        # OnAccessIncludePath row
+        include_path_row = Adw.EntryRow()
+        include_path_row.set_title("Include Paths")
+        include_path_row.set_input_purpose(Gtk.InputPurpose.FREE_FORM)
+        include_path_row.set_show_apply_button(False)
+        # Add folder icon as prefix
+        include_icon = Gtk.Image.new_from_icon_name("folder-symbolic")
+        include_icon.set_margin_start(6)
+        include_path_row.add_prefix(include_icon)
+        self._onaccess_widgets['OnAccessIncludePath'] = include_path_row
+        group.add(include_path_row)
+
+        # OnAccessExcludePath row
+        exclude_path_row = Adw.EntryRow()
+        exclude_path_row.set_title("Exclude Paths")
+        exclude_path_row.set_input_purpose(Gtk.InputPurpose.FREE_FORM)
+        exclude_path_row.set_show_apply_button(False)
+        # Add folder icon as prefix with different style
+        exclude_icon = Gtk.Image.new_from_icon_name("folder-symbolic")
+        exclude_icon.set_margin_start(6)
+        exclude_path_row.add_prefix(exclude_icon)
+        self._onaccess_widgets['OnAccessExcludePath'] = exclude_path_row
+        group.add(exclude_path_row)
+
+        page.add(group)
+
+    def _create_onaccess_behavior_group(self, page: Adw.PreferencesPage):
+        """
+        Create the On-Access Behavior preferences group.
+
+        Contains settings for:
+        - OnAccessPrevention: Block access to infected files
+        - OnAccessExtraScanning: Monitor file creation/moves via inotify
+        - OnAccessDenyOnError: Deny access when scan fails
+        - OnAccessDisableDDD: Disable Directory Descent Detection
+
+        Args:
+            page: The preferences page to add the group to
+        """
+        group = Adw.PreferencesGroup()
+        group.set_title("Behavior Settings")
+        group.set_description(
+            "Configure how On-Access scanning responds to file access events"
+        )
+        group.set_header_suffix(self._create_permission_indicator())
+
+        # OnAccessPrevention switch
+        prevention_row = Adw.SwitchRow()
+        prevention_row.set_title("Prevention Mode")
+        prevention_row.set_subtitle("Block access to infected files")
+        self._onaccess_widgets['OnAccessPrevention'] = prevention_row
+        group.add(prevention_row)
+
+        # OnAccessExtraScanning switch
+        extra_scanning_row = Adw.SwitchRow()
+        extra_scanning_row.set_title("Extra Scanning")
+        extra_scanning_row.set_subtitle("Monitor file creation/moves via inotify")
+        self._onaccess_widgets['OnAccessExtraScanning'] = extra_scanning_row
+        group.add(extra_scanning_row)
+
+        # OnAccessDenyOnError switch
+        deny_on_error_row = Adw.SwitchRow()
+        deny_on_error_row.set_title("Deny on Error")
+        deny_on_error_row.set_subtitle("Deny access when scan fails (requires Prevention)")
+        self._onaccess_widgets['OnAccessDenyOnError'] = deny_on_error_row
+        group.add(deny_on_error_row)
+
+        # OnAccessDisableDDD switch
+        disable_ddd_row = Adw.SwitchRow()
+        disable_ddd_row.set_title("Disable DDD")
+        disable_ddd_row.set_subtitle("Disable Directory Descent Detection")
+        self._onaccess_widgets['OnAccessDisableDDD'] = disable_ddd_row
+        group.add(disable_ddd_row)
+
+        page.add(group)
+
+    def _create_onaccess_performance_group(self, page: Adw.PreferencesPage):
+        """
+        Create the On-Access Performance preferences group.
+
+        Contains settings for:
+        - OnAccessMaxThreads: Maximum number of scanning threads
+        - OnAccessMaxFileSize: Maximum file size to scan (in MB)
+        - OnAccessCurlTimeout: Timeout for curl operations (seconds)
+        - OnAccessRetryAttempts: Number of retry attempts when scan fails
+
+        Args:
+            page: The preferences page to add the group to
+        """
+        group = Adw.PreferencesGroup()
+        group.set_title("Performance Settings")
+        group.set_description("Configure On-Access scanning performance and limits")
+        group.set_header_suffix(self._create_permission_indicator())
+
+        # OnAccessMaxThreads spin row (1-64)
+        max_threads_row = Adw.SpinRow.new_with_range(1, 64, 1)
+        max_threads_row.set_title("Max Threads")
+        max_threads_row.set_subtitle("Maximum number of scanning threads")
+        max_threads_row.set_numeric(True)
+        max_threads_row.set_snap_to_ticks(True)
+        self._onaccess_widgets['OnAccessMaxThreads'] = max_threads_row
+        group.add(max_threads_row)
+
+        # OnAccessMaxFileSize spin row (in MB, 0-4000)
+        max_file_size_row = Adw.SpinRow.new_with_range(0, 4000, 1)
+        max_file_size_row.set_title("Max File Size (MB)")
+        max_file_size_row.set_subtitle("Maximum file size to scan (0 = unlimited)")
+        max_file_size_row.set_numeric(True)
+        max_file_size_row.set_snap_to_ticks(True)
+        self._onaccess_widgets['OnAccessMaxFileSize'] = max_file_size_row
+        group.add(max_file_size_row)
+
+        # OnAccessCurlTimeout spin row (in seconds, 0-3600)
+        curl_timeout_row = Adw.SpinRow.new_with_range(0, 3600, 1)
+        curl_timeout_row.set_title("Curl Timeout (seconds)")
+        curl_timeout_row.set_subtitle("Timeout for remote scanning operations (0 = disabled)")
+        curl_timeout_row.set_numeric(True)
+        curl_timeout_row.set_snap_to_ticks(True)
+        self._onaccess_widgets['OnAccessCurlTimeout'] = curl_timeout_row
+        group.add(curl_timeout_row)
+
+        # OnAccessRetryAttempts spin row (0-10)
+        retry_attempts_row = Adw.SpinRow.new_with_range(0, 10, 1)
+        retry_attempts_row.set_title("Retry Attempts")
+        retry_attempts_row.set_subtitle("Number of retry attempts when scan fails")
+        retry_attempts_row.set_numeric(True)
+        retry_attempts_row.set_snap_to_ticks(True)
+        self._onaccess_widgets['OnAccessRetryAttempts'] = retry_attempts_row
+        group.add(retry_attempts_row)
+
+        page.add(group)
+
+    def _create_onaccess_exclusions_group(self, page: Adw.PreferencesPage):
+        """
+        Create the On-Access Exclusions preferences group.
+
+        Contains settings for:
+        - OnAccessExcludeUname: Username to exclude from On-Access scanning
+        - OnAccessExcludeUID: User ID to exclude from On-Access scanning
+        - OnAccessExcludeRootUID: Exclude root user from On-Access scanning
+
+        CRITICAL: At least one of these must be set to prevent infinite scan loops
+        when the scanner process accesses files during scanning.
+
+        Args:
+            page: The preferences page to add the group to
+        """
+        group = Adw.PreferencesGroup()
+        group.set_title("Scan Loop Prevention")
+        group.set_description(
+            "CRITICAL: At least one exclusion must be set to prevent infinite scan loops. "
+            "The scanner process must be excluded from triggering scans on its own file access."
+        )
+        group.set_header_suffix(self._create_permission_indicator())
+
+        # Warning banner row
+        warning_row = Adw.ActionRow()
+        warning_row.set_title("⚠ Required Configuration")
+        warning_row.set_subtitle(
+            "Without exclusions, clamonacc will trigger scans on files it accesses, "
+            "causing an infinite loop. Set the clamav user or its UID."
+        )
+        warning_row.add_css_class("warning")
+        # Add warning icon as prefix
+        warning_icon = Gtk.Image.new_from_icon_name("dialog-warning-symbolic")
+        warning_icon.set_margin_start(6)
+        warning_row.add_prefix(warning_icon)
+        group.add(warning_row)
+
+        # Help text row with instructions on how to find the clamav user
+        help_row = Adw.ActionRow()
+        help_row.set_title("How to find the ClamAV user")
+        help_row.set_subtitle(
+            "Run 'id clamav' or 'grep clamav /etc/passwd' in terminal. "
+            "Common usernames: 'clamav', 'clamscan', or 'clamwin'. "
+            "The UID is typically 999 or similar."
+        )
+        # Add help icon as prefix
+        help_icon = Gtk.Image.new_from_icon_name("help-about-symbolic")
+        help_icon.set_margin_start(6)
+        help_row.add_prefix(help_icon)
+        group.add(help_row)
+
+        # OnAccessExcludeUname entry row
+        exclude_uname_row = Adw.EntryRow()
+        exclude_uname_row.set_title("Exclude Username")
+        exclude_uname_row.set_input_purpose(Gtk.InputPurpose.FREE_FORM)
+        exclude_uname_row.set_show_apply_button(False)
+        # Add user icon as prefix
+        user_icon = Gtk.Image.new_from_icon_name("avatar-default-symbolic")
+        user_icon.set_margin_start(6)
+        exclude_uname_row.add_prefix(user_icon)
+        self._onaccess_widgets['OnAccessExcludeUname'] = exclude_uname_row
+        group.add(exclude_uname_row)
+
+        # OnAccessExcludeUID spin row (0-65534)
+        exclude_uid_row = Adw.SpinRow.new_with_range(0, 65534, 1)
+        exclude_uid_row.set_title("Exclude User ID")
+        exclude_uid_row.set_subtitle("User ID to exclude from On-Access scanning")
+        exclude_uid_row.set_numeric(True)
+        exclude_uid_row.set_snap_to_ticks(True)
+        self._onaccess_widgets['OnAccessExcludeUID'] = exclude_uid_row
+        group.add(exclude_uid_row)
+
+        # OnAccessExcludeRootUID switch
+        exclude_root_row = Adw.SwitchRow()
+        exclude_root_row.set_title("Exclude Root User")
+        exclude_root_row.set_subtitle("Exclude root (UID 0) from On-Access scanning")
+        self._onaccess_widgets['OnAccessExcludeRootUID'] = exclude_root_row
+        group.add(exclude_root_row)
+
+        page.add(group)
+
     def _create_scheduled_scans_page(self):
         """
         Create the Scheduled Scans configuration page.
@@ -1083,6 +1357,7 @@ class PreferencesWindow(Adw.PreferencesWindow):
             try:
                 self._clamd_config, error = parse_config(self._clamd_conf_path)
                 self._populate_clamd_fields()
+                self._populate_onaccess_fields()
             except Exception as e:
                 print(f"Error loading clamd.conf: {e}")
 
@@ -1255,6 +1530,109 @@ class PreferencesWindow(Adw.PreferencesWindow):
                 self._clamd_config.get_value('LogSyslog').lower() == 'yes'
             )
 
+    def _populate_onaccess_fields(self):
+        """
+        Populate On-Access configuration fields from loaded clamd.conf config.
+
+        Updates UI widgets with On-Access scanning values from the parsed
+        clamd.conf file. On-Access settings control real-time file monitoring
+        via clamonacc.
+        """
+        if not self._clamd_config:
+            return
+
+        # Populate OnAccessIncludePath (comma-separated paths)
+        if self._clamd_config.has_key('OnAccessIncludePath'):
+            values = self._clamd_config.get_values('OnAccessIncludePath')
+            if values:
+                self._onaccess_widgets['OnAccessIncludePath'].set_text(
+                    ', '.join(values)
+                )
+
+        # Populate OnAccessExcludePath (comma-separated paths)
+        if self._clamd_config.has_key('OnAccessExcludePath'):
+            values = self._clamd_config.get_values('OnAccessExcludePath')
+            if values:
+                self._onaccess_widgets['OnAccessExcludePath'].set_text(
+                    ', '.join(values)
+                )
+
+        # Populate OnAccessPrevention (switch)
+        if self._clamd_config.has_key('OnAccessPrevention'):
+            self._onaccess_widgets['OnAccessPrevention'].set_active(
+                self._clamd_config.get_value('OnAccessPrevention').lower() == 'yes'
+            )
+
+        # Populate OnAccessExtraScanning (switch)
+        if self._clamd_config.has_key('OnAccessExtraScanning'):
+            self._onaccess_widgets['OnAccessExtraScanning'].set_active(
+                self._clamd_config.get_value('OnAccessExtraScanning').lower() == 'yes'
+            )
+
+        # Populate OnAccessDenyOnError (switch)
+        if self._clamd_config.has_key('OnAccessDenyOnError'):
+            self._onaccess_widgets['OnAccessDenyOnError'].set_active(
+                self._clamd_config.get_value('OnAccessDenyOnError').lower() == 'yes'
+            )
+
+        # Populate OnAccessDisableDDD (switch)
+        if self._clamd_config.has_key('OnAccessDisableDDD'):
+            self._onaccess_widgets['OnAccessDisableDDD'].set_active(
+                self._clamd_config.get_value('OnAccessDisableDDD').lower() == 'yes'
+            )
+
+        # Populate OnAccessMaxThreads (spin)
+        if self._clamd_config.has_key('OnAccessMaxThreads'):
+            try:
+                threads_value = int(self._clamd_config.get_value('OnAccessMaxThreads'))
+                self._onaccess_widgets['OnAccessMaxThreads'].set_value(threads_value)
+            except (ValueError, TypeError):
+                pass
+
+        # Populate OnAccessMaxFileSize (spin, in MB)
+        if self._clamd_config.has_key('OnAccessMaxFileSize'):
+            try:
+                size_value = int(self._clamd_config.get_value('OnAccessMaxFileSize'))
+                self._onaccess_widgets['OnAccessMaxFileSize'].set_value(size_value)
+            except (ValueError, TypeError):
+                pass
+
+        # Populate OnAccessCurlTimeout (spin, in seconds)
+        if self._clamd_config.has_key('OnAccessCurlTimeout'):
+            try:
+                timeout_value = int(self._clamd_config.get_value('OnAccessCurlTimeout'))
+                self._onaccess_widgets['OnAccessCurlTimeout'].set_value(timeout_value)
+            except (ValueError, TypeError):
+                pass
+
+        # Populate OnAccessRetryAttempts (spin)
+        if self._clamd_config.has_key('OnAccessRetryAttempts'):
+            try:
+                retry_value = int(self._clamd_config.get_value('OnAccessRetryAttempts'))
+                self._onaccess_widgets['OnAccessRetryAttempts'].set_value(retry_value)
+            except (ValueError, TypeError):
+                pass
+
+        # Populate OnAccessExcludeUname (entry)
+        if self._clamd_config.has_key('OnAccessExcludeUname'):
+            self._onaccess_widgets['OnAccessExcludeUname'].set_text(
+                self._clamd_config.get_value('OnAccessExcludeUname')
+            )
+
+        # Populate OnAccessExcludeUID (spin)
+        if self._clamd_config.has_key('OnAccessExcludeUID'):
+            try:
+                uid_value = int(self._clamd_config.get_value('OnAccessExcludeUID'))
+                self._onaccess_widgets['OnAccessExcludeUID'].set_value(uid_value)
+            except (ValueError, TypeError):
+                pass
+
+        # Populate OnAccessExcludeRootUID (switch)
+        if self._clamd_config.has_key('OnAccessExcludeRootUID'):
+            self._onaccess_widgets['OnAccessExcludeRootUID'].set_active(
+                self._clamd_config.get_value('OnAccessExcludeRootUID').lower() == 'yes'
+            )
+
     def _on_save_clicked(self, button: Gtk.Button):
         """
         Handle save button click event.
@@ -1275,13 +1653,16 @@ class PreferencesWindow(Adw.PreferencesWindow):
         # Collect form data
         freshclam_updates = self._collect_freshclam_data()
         clamd_updates = self._collect_clamd_data()
+        onaccess_updates = self._collect_onaccess_data()
         scheduled_updates = self._collect_scheduled_data()
 
         # Validate configurations
         if freshclam_updates:
             is_valid, errors = validate_config(self._freshclam_config)
             if not is_valid:
-                self._show_error_dialog("Validation Error", errors)
+                # Convert list of errors to a single string for display
+                error_message = "\n".join(errors)
+                self._show_error_dialog("Validation Error", error_message)
                 self._is_saving = False
                 button.set_sensitive(True)
                 return
@@ -1289,7 +1670,9 @@ class PreferencesWindow(Adw.PreferencesWindow):
         if clamd_updates and self._clamd_available:
             is_valid, errors = validate_config(self._clamd_config)
             if not is_valid:
-                self._show_error_dialog("Validation Error", errors)
+                # Convert list of errors to a single string for display
+                error_message = "\n".join(errors)
+                self._show_error_dialog("Validation Error", error_message)
                 self._is_saving = False
                 button.set_sensitive(True)
                 return
@@ -1297,7 +1680,7 @@ class PreferencesWindow(Adw.PreferencesWindow):
         # Run save in background thread
         save_thread = threading.Thread(
             target=self._save_configs_thread,
-            args=(freshclam_updates, clamd_updates, scheduled_updates, button)
+            args=(freshclam_updates, clamd_updates, onaccess_updates, scheduled_updates, button)
         )
         save_thread.daemon = True
         save_thread.start()
@@ -1396,6 +1779,74 @@ class PreferencesWindow(Adw.PreferencesWindow):
 
         return updates
 
+    def _collect_onaccess_data(self) -> dict:
+        """
+        Collect On-Access scanning configuration data from form widgets.
+
+        Returns:
+            Dictionary of configuration key-value pairs to save
+        """
+        if not self._clamd_available:
+            return {}
+
+        updates = {}
+
+        # Collect path settings (comma-separated entries become multiple values)
+        include_path = self._onaccess_widgets['OnAccessIncludePath'].get_text().strip()
+        if include_path:
+            # Split comma-separated paths and store as list for multi-value config
+            updates['OnAccessIncludePath'] = [
+                p.strip() for p in include_path.split(',') if p.strip()
+            ]
+
+        exclude_path = self._onaccess_widgets['OnAccessExcludePath'].get_text().strip()
+        if exclude_path:
+            updates['OnAccessExcludePath'] = [
+                p.strip() for p in exclude_path.split(',') if p.strip()
+            ]
+
+        # Collect behavior switches
+        updates['OnAccessPrevention'] = (
+            'yes' if self._onaccess_widgets['OnAccessPrevention'].get_active() else 'no'
+        )
+        updates['OnAccessExtraScanning'] = (
+            'yes' if self._onaccess_widgets['OnAccessExtraScanning'].get_active() else 'no'
+        )
+        updates['OnAccessDenyOnError'] = (
+            'yes' if self._onaccess_widgets['OnAccessDenyOnError'].get_active() else 'no'
+        )
+        updates['OnAccessDisableDDD'] = (
+            'yes' if self._onaccess_widgets['OnAccessDisableDDD'].get_active() else 'no'
+        )
+
+        # Collect performance settings (spin rows)
+        updates['OnAccessMaxThreads'] = str(
+            int(self._onaccess_widgets['OnAccessMaxThreads'].get_value())
+        )
+        updates['OnAccessMaxFileSize'] = str(
+            int(self._onaccess_widgets['OnAccessMaxFileSize'].get_value())
+        )
+        updates['OnAccessCurlTimeout'] = str(
+            int(self._onaccess_widgets['OnAccessCurlTimeout'].get_value())
+        )
+        updates['OnAccessRetryAttempts'] = str(
+            int(self._onaccess_widgets['OnAccessRetryAttempts'].get_value())
+        )
+
+        # Collect user exclusion settings
+        exclude_uname = self._onaccess_widgets['OnAccessExcludeUname'].get_text().strip()
+        if exclude_uname:
+            updates['OnAccessExcludeUname'] = exclude_uname
+
+        updates['OnAccessExcludeUID'] = str(
+            int(self._onaccess_widgets['OnAccessExcludeUID'].get_value())
+        )
+        updates['OnAccessExcludeRootUID'] = (
+            'yes' if self._onaccess_widgets['OnAccessExcludeRootUID'].get_active() else 'no'
+        )
+
+        return updates
+
     def _collect_scheduled_data(self) -> dict:
         """
         Collect scheduled scan configuration from form widgets.
@@ -1473,6 +1924,7 @@ class PreferencesWindow(Adw.PreferencesWindow):
         self,
         freshclam_updates: dict,
         clamd_updates: dict,
+        onaccess_updates: dict,
         scheduled_updates: dict,
         button: Gtk.Button
     ):
@@ -1485,6 +1937,7 @@ class PreferencesWindow(Adw.PreferencesWindow):
         Args:
             freshclam_updates: Dictionary of freshclam.conf updates
             clamd_updates: Dictionary of clamd.conf updates
+            onaccess_updates: Dictionary of On-Access scanning settings (clamd.conf)
             scheduled_updates: Dictionary of scheduled scan settings
             button: The save button to re-enable after completion
         """
@@ -1503,10 +1956,13 @@ class PreferencesWindow(Adw.PreferencesWindow):
                 if not success:
                     raise Exception(f"Failed to save freshclam.conf: {error}")
 
-            # Save clamd.conf
-            if clamd_updates and self._clamd_config:
-                # Apply updates to config using set_value
+            # Save clamd.conf (includes both scanner settings and On-Access settings)
+            if (clamd_updates or onaccess_updates) and self._clamd_config:
+                # Apply scanner updates to config using set_value
                 for key, value in clamd_updates.items():
+                    self._clamd_config.set_value(key, value)
+                # Apply On-Access updates to config using set_value
+                for key, value in onaccess_updates.items():
                     self._clamd_config.set_value(key, value)
                 success, error = write_config_with_elevation(self._clamd_config)
                 if not success:

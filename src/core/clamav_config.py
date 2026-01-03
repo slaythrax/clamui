@@ -398,11 +398,13 @@ CONFIG_OPTION_TYPES = {
     'MaxFiles': {'type': 'integer', 'min': 0, 'max': 100000},
     'MaxThreads': {'type': 'integer', 'min': 1, 'max': 256},
     'MaxDirectoryRecursion': {'type': 'integer', 'min': 0, 'max': 100},
-    'MaxEmbeddedPE': {'type': 'integer', 'min': 0},
-    'MaxHTMLNormalize': {'type': 'integer', 'min': 0},
-    'MaxHTMLNoTags': {'type': 'integer', 'min': 0},
-    'MaxScriptNormalize': {'type': 'integer', 'min': 0},
-    'MaxZipTypeRcg': {'type': 'integer', 'min': 0},
+    # Size options that accept integer or size suffix like M, K
+    'MaxEmbeddedPE': {'type': 'size'},
+    'MaxHTMLNormalize': {'type': 'size'},
+    'MaxHTMLNoTags': {'type': 'size'},
+    'MaxScriptNormalize': {'type': 'size'},
+    'MaxZipTypeRcg': {'type': 'size'},
+    # Pure integer options
     'MaxPartitions': {'type': 'integer', 'min': 0},
     'MaxIconsPE': {'type': 'integer', 'min': 0},
     'TCPSocket': {'type': 'integer', 'min': 1, 'max': 65535},
@@ -427,6 +429,31 @@ CONFIG_OPTION_TYPES = {
     'User': {'type': 'string'},
     'LocalSocketGroup': {'type': 'string'},
     'LocalSocketMode': {'type': 'string'},
+
+    # On-Access scanning options (clamonacc)
+    # Path options
+    'OnAccessIncludePath': {'type': 'path', 'must_exist': False},
+    'OnAccessExcludePath': {'type': 'path', 'must_exist': False},
+    'OnAccessMountPath': {'type': 'path', 'must_exist': False},
+
+    # Boolean options
+    'OnAccessPrevention': {'type': 'boolean'},
+    'OnAccessExtraScanning': {'type': 'boolean'},
+    'OnAccessDenyOnError': {'type': 'boolean'},
+    'OnAccessDisableDDD': {'type': 'boolean'},
+    'OnAccessExcludeRootUID': {'type': 'boolean'},
+
+    # Integer options
+    'OnAccessMaxThreads': {'type': 'integer', 'min': 1, 'max': 256},
+    'OnAccessCurlTimeout': {'type': 'integer', 'min': 0, 'max': 60000},
+    'OnAccessRetryAttempts': {'type': 'integer', 'min': 0, 'max': 10},
+    'OnAccessExcludeUID': {'type': 'integer', 'min': 0},
+
+    # Size options
+    'OnAccessMaxFileSize': {'type': 'size'},
+
+    # String options
+    'OnAccessExcludeUname': {'type': 'string'},
 }
 
 
