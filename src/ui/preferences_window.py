@@ -103,6 +103,7 @@ class PreferencesWindow(Adw.PreferencesWindow):
         self._freshclam_widgets = {}
         self._clamd_widgets = {}
         self._scheduled_widgets = {}
+        self._onaccess_widgets = {}
 
         # Track if clamd.conf exists
         self._clamd_available = False
