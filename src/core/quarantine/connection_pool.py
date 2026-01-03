@@ -6,6 +6,7 @@ Manages a pool of SQLite connections to reduce connection overhead for
 batch operations and UI updates that make multiple quick queries.
 """
 
+import os
 import queue
 import sqlite3
 import threading
@@ -30,6 +31,9 @@ class ConnectionPool:
         _total_connections: Total number of connections created
         _closed: Flag indicating if the pool has been closed
     """
+
+    # Database file permission: owner read/write only (prevents other users from reading sensitive metadata)
+    DB_FILE_PERMISSIONS = 0o600
 
     def __init__(self, db_path: str, pool_size: int = 5):
         """
@@ -71,11 +75,44 @@ class ConnectionPool:
             conn.execute("PRAGMA journal_mode=WAL")
             # Enable foreign key constraints
             conn.execute("PRAGMA foreign_keys=ON")
+
+            # Secure database file permissions after connection creation
+            # This ensures the database file and associated WAL/SHM files have
+            # restrictive permissions when first created
+            self._secure_db_file_permissions()
+
             return conn
         except sqlite3.Error:
             # Close connection on configuration failure
             conn.close()
             raise
+
+    def _secure_db_file_permissions(self) -> None:
+        """
+        Set restrictive permissions on database files to prevent unauthorized access.
+
+        Secures the main database file and associated WAL/SHM files created by
+        SQLite's Write-Ahead Logging mode. All files are set to 0o600 (owner read/write only)
+        to prevent other users from reading sensitive quarantine metadata.
+
+        Handles permission errors gracefully - failures do not raise exceptions
+        to avoid breaking database functionality on systems with restrictive security policies.
+        """
+        # Database files to secure (main db + WAL mode files)
+        db_files = [
+            self._db_path,  # Main database file
+            Path(str(self._db_path) + '-wal'),  # Write-Ahead Log file
+            Path(str(self._db_path) + '-shm'),  # Shared Memory file
+        ]
+
+        for db_file in db_files:
+            if db_file.exists():
+                try:
+                    os.chmod(db_file, self.DB_FILE_PERMISSIONS)
+                except (OSError, PermissionError):
+                    # Silently handle permission errors to avoid breaking database functionality
+                    # on systems with restrictive security policies or immutable files
+                    pass
 
     def acquire(self, timeout: Optional[float] = None) -> sqlite3.Connection:
         """
