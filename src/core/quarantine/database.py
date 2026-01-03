@@ -194,6 +194,11 @@ class QuarantineDatabase:
                         """
                     )
                     conn.commit()
+
+                    # Secure database file permissions after schema creation
+                    # This runs for both new and existing databases to ensure
+                    # the file and WAL/SHM files have restrictive permissions
+                    self._secure_db_file_permissions()
             except sqlite3.Error:
                 # Database initialization failed - will be handled on operations
                 pass
