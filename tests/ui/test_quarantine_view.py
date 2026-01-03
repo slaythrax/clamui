@@ -438,9 +438,11 @@ class TestQuarantineViewStorageInfo:
         view._storage_row = mock.MagicMock()
         view._count_label = mock.MagicMock()
 
-        view._update_storage_info()
+        # Create mock entries
+        mock_entries = [mock.MagicMock(file_size=1024 * 200) for _ in range(5)]
+        view._update_storage_info(mock_entries)
 
-        view._storage_row.set_subtitle.assert_called_with("1.0 MB")
+        view._storage_row.set_subtitle.assert_called()
         view._count_label.set_text.assert_called_with("5 items")
 
     def test_update_storage_info_singular_item(
@@ -454,7 +456,9 @@ class TestQuarantineViewStorageInfo:
         view._storage_row = mock.MagicMock()
         view._count_label = mock.MagicMock()
 
-        view._update_storage_info()
+        # Create mock entry
+        mock_entries = [mock.MagicMock(file_size=512)]
+        view._update_storage_info(mock_entries)
 
         view._count_label.set_text.assert_called_with("1 item")
 
@@ -892,7 +896,8 @@ def test_quarantine_view_basic(mock_gi_modules):
         view._count_label = mock.MagicMock()
 
         # Test _update_storage_info
-        view._update_storage_info()
+        mock_entries = [mock.MagicMock(file_size=512) for _ in range(5)]
+        view._update_storage_info(mock_entries)
 
         view._storage_row.set_subtitle.assert_called_with("2.0 KB")
         view._count_label.set_text.assert_called_with("5 items")

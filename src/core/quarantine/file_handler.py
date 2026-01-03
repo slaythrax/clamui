@@ -187,6 +187,24 @@ class SecureFileHandler:
         except OSError as e:
             return (-1, f"Error accessing file: {e}")
 
+    def verify_file_integrity(self, file_path: str, expected_hash: str) -> tuple[bool, str | None]:
+        """
+        Verify file integrity by comparing hash.
+
+        Args:
+            file_path: Path to the file to verify
+            expected_hash: Expected SHA256 hash
+
+        Returns:
+            Tuple of (is_valid, error_message)
+        """
+        actual_hash, error = self.calculate_hash(Path(file_path))
+        if error:
+            return (False, error)
+        if actual_hash != expected_hash:
+            return (False, "File hash mismatch - file may be corrupted")
+        return (True, None)
+
     def _generate_quarantine_filename(self, original_path: Path) -> str:
         """
         Generate a unique filename for the quarantined file.

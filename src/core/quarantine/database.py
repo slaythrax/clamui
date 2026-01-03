@@ -510,4 +510,4 @@ class QuarantineDatabase:
         When connection pooling is enabled, this closes all connections in the pool.
         """
         if self._pool is not None:
-            self._pool.close()
+            self._pool.close_all()

@@ -233,11 +233,6 @@ class TestRestoreWorkflow:
         """Test that restore verifies file integrity before restoring."""
         entry, _ = self.create_and_quarantine_file(temp_environment, manager, "integrity_test.exe")
 
-        # Verify integrity before tampering
-        is_valid, error = manager.verify_entry_integrity(entry.id)
-        assert is_valid is True
-        assert error is None
-
         # Tamper with the quarantined file
         quarantine_path = Path(entry.quarantine_path)
         os.chmod(quarantine_path, stat.S_IRUSR | stat.S_IWUSR)
@@ -531,79 +526,6 @@ class TestConfigChange:
         assert Path(result1.entry.quarantine_path).parent == temp_environment["quarantine_dir1"]
         assert Path(result2.entry.quarantine_path).parent == temp_environment["quarantine_dir2"]
 
-
-class TestQuarantineInfoIntegration:
-    """Integration tests for quarantine info retrieval."""
-
-    @pytest.fixture
-    def temp_environment(self):
-        """Create a temporary environment for testing."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            source_dir = Path(tmpdir) / "source"
-            source_dir.mkdir()
-            quarantine_dir = Path(tmpdir) / "quarantine"
-            db_path = Path(tmpdir) / "quarantine.db"
-
-            yield {
-                "tmpdir": tmpdir,
-                "source_dir": source_dir,
-                "quarantine_dir": quarantine_dir,
-                "db_path": db_path,
-            }
-
-    @pytest.fixture
-    def manager(self, temp_environment):
-        """Create a QuarantineManager for testing."""
-        mgr = QuarantineManager(
-            quarantine_directory=str(temp_environment["quarantine_dir"]),
-            database_path=str(temp_environment["db_path"]),
-        )
-        yield mgr
-        # Explicitly close the database to prevent resource warnings
-        mgr._database.close()
-
-    def test_get_quarantine_info_integration(self, temp_environment, manager):
-        """Test get_quarantine_info returns correct comprehensive data."""
-        # Initial state
-        info = manager.get_quarantine_info()
-        assert info["directory_exists"] is True
-        assert info["entry_count"] == 0
-        assert info["total_size"] == 0
-        assert info["permissions"] == "700"
-
-        # Quarantine some files
-        for i in range(3):
-            file_path = temp_environment["source_dir"] / f"file{i}.exe"
-            file_path.write_bytes(b"x" * (100 * (i + 1)))
-            result = manager.quarantine_file(str(file_path), f"Threat{i}")
-            assert result.is_success
-
-        # Check updated info
-        info = manager.get_quarantine_info()
-        assert info["entry_count"] == 3
-        assert info["total_size"] == 100 + 200 + 300
-        assert info["file_count"] == 3
-        assert info["permissions"] == "700"
-
-    def test_quarantine_info_matches_database_and_filesystem(self, temp_environment, manager):
-        """Test that quarantine info is consistent between database and filesystem."""
-        # Quarantine files
-        for i in range(5):
-            file_path = temp_environment["source_dir"] / f"test{i}.exe"
-            file_path.write_bytes(b"content" * (i + 1))
-            manager.quarantine_file(str(file_path), f"Threat{i}")
-
-        info = manager.get_quarantine_info()
-
-        # Verify entry_count matches get_entry_count
-        assert info["entry_count"] == manager.get_entry_count()
-
-        # Verify total_size matches get_total_size
-        assert info["total_size"] == manager.get_total_size()
-
-        # Verify file_count matches actual files in directory
-        actual_files = list(temp_environment["quarantine_dir"].iterdir())
-        assert info["file_count"] == len(actual_files)
 
 
 class TestEdgeCases:

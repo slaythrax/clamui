@@ -12,12 +12,7 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Adw, GLib, Gtk
 
-from src.core.clamav_config import (
-    backup_config,
-    parse_config,
-    validate_config,
-    write_config_with_elevation,
-)
+from src.core.clamav_config import parse_config
 from src.core.scheduler import Scheduler, ScheduleFrequency
 from src.core.scanner import validate_pattern
 from src.ui.utils import add_row_icon

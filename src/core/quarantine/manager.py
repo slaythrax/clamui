@@ -326,7 +326,7 @@ class QuarantineManager:
                 )
 
             # Delete the file
-            file_result = self._file_handler.delete_quarantined_file(entry.quarantine_path)
+            file_result = self._file_handler.delete_from_quarantine(entry.quarantine_path)
 
             if not file_result.is_success:
                 status = self._map_file_status(file_result.status)
@@ -460,6 +460,52 @@ class QuarantineManager:
         """
         return self._database.get_old_entries(days)
 
+    def cleanup_old_entries(self, days: int = 30) -> int:
+        """
+        Delete old quarantine entries and their files.
+
+        Args:
+            days: Delete entries older than this many days (default: 30)
+
+        Returns:
+            Number of entries removed
+        """
+        with self._lock:
+            # Get old entries
+            old_entries = self.get_old_entries(days)
+
+            # Delete each file
+            for entry in old_entries:
+                try:
+                    self._file_handler.delete_from_quarantine(entry.quarantine_path)
+                except Exception:
+                    # Continue even if file deletion fails
+                    pass
+
+            # Remove from database
+            return self._database.cleanup_old_entries(days)
+
+    def cleanup_old_entries_async(
+        self,
+        callback: Callable[[int], None],
+        days: int = 30,
+    ) -> None:
+        """
+        Delete old quarantine entries asynchronously.
+
+        Args:
+            callback: Function to call with removed count when complete
+            days: Delete entries older than this many days (default: 30)
+        """
+
+        def _cleanup_thread():
+            removed_count = self.cleanup_old_entries(days)
+            GLib.idle_add(callback, removed_count)
+
+        thread = threading.Thread(target=_cleanup_thread)
+        thread.daemon = True
+        thread.start()
+
     def _map_file_status(self, file_status: FileOperationStatus) -> QuarantineStatus:
         """Map FileOperationStatus to QuarantineStatus."""
         status_map = {
@@ -467,6 +513,7 @@ class QuarantineManager:
             FileOperationStatus.FILE_NOT_FOUND: QuarantineStatus.FILE_NOT_FOUND,
             FileOperationStatus.PERMISSION_DENIED: QuarantineStatus.PERMISSION_DENIED,
             FileOperationStatus.DISK_FULL: QuarantineStatus.DISK_FULL,
+            FileOperationStatus.INVALID_RESTORE_PATH: QuarantineStatus.INVALID_RESTORE_PATH,
             FileOperationStatus.ERROR: QuarantineStatus.ERROR,
         }
         return status_map.get(file_status, QuarantineStatus.ERROR)
