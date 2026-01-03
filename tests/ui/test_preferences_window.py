@@ -291,6 +291,3 @@ class TestPreferencesWindowFolderOpening:
 
         adw.AlertDialog.assert_called_once()
         mock_dialog.set_heading.assert_called_with("Error Opening Folder")
-
-
-        assert result["HTTPProxyPassword"] == "proxypass"

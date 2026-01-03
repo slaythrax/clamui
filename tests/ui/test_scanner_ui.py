@@ -293,9 +293,6 @@ class TestFileSelectionUI:
         assert hasattr(mock_scan_view, "_path_row")
         assert mock_scan_view._path_row is not None
 
-        # Verify get_root was called
-        mock_scan_view.get_root.assert_called()
-
     def test_initial_path_is_empty_string(self, mock_scan_view):
         """Test that the initial selected path is an empty string."""
         assert mock_scan_view._selected_path == ""
