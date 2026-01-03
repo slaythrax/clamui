@@ -79,7 +79,7 @@ class ConnectionPool:
         Raises:
             sqlite3.Error: If connection creation or configuration fails
         """
-        conn = sqlite3.connect(str(self._db_path), timeout=30.0)
+        conn = sqlite3.connect(str(self._db_path), timeout=30.0, check_same_thread=False)
         try:
             # Enable WAL mode for better concurrency and corruption prevention
             conn.execute("PRAGMA journal_mode=WAL")
@@ -167,7 +167,13 @@ class ConnectionPool:
         if self._closed:
             raise RuntimeError("Connection pool has been closed")
 
-        # First, check if we can create a new connection (non-blocking check)
+        # STEP 1: Try to get from pool first (non-blocking)
+        try:
+            return self._pool.get(block=False)
+        except queue.Empty:
+            pass  # Pool is empty, continue to next step
+
+        # STEP 2: Pool empty - check if we can create new connection
         with self._lock:
             if self._total_connections < self._pool_size:
                 # We can create a new connection
@@ -175,12 +181,8 @@ class ConnectionPool:
                 self._total_connections += 1
                 return conn
 
-        # Pool is at max capacity - wait for an available connection
-        try:
-            return self._pool.get(block=True, timeout=timeout)
-        except queue.Empty:
-            # Timeout while waiting for a connection - re-raise
-            raise
+        # STEP 3: At max capacity - wait for released connection
+        return self._pool.get(block=True, timeout=timeout)
 
     def release(self, conn: sqlite3.Connection) -> None:
         """
@@ -207,9 +209,9 @@ class ConnectionPool:
             conn.execute("SELECT 1")
             # Connection is valid - return to pool
             self._pool.put(conn, block=False)
-        except (sqlite3.Error, queue.Full):
-            # Connection is invalid or pool is full - close and discard
-            # This handles: database locked, connection closed, or pool overflow
+        except (sqlite3.Error, sqlite3.ProgrammingError, queue.Full):
+            # Connection is invalid, has thread issues, or pool is full - close and discard
+            # This handles: database locked, connection closed, thread affinity, or pool overflow
             conn.close()
             # Decrement total connections count since we're discarding this one
             with self._lock:
