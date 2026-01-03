@@ -14,32 +14,34 @@ import os
 import shutil
 import stat
 import threading
+import uuid
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Optional, Tuple
-import uuid
 
 
 class FileOperationStatus(Enum):
     """Status of a file operation."""
+
     SUCCESS = "success"
     ERROR = "error"
     FILE_NOT_FOUND = "file_not_found"
     PERMISSION_DENIED = "permission_denied"
     ALREADY_EXISTS = "already_exists"
     DISK_FULL = "disk_full"
+    INVALID_RESTORE_PATH = "invalid_restore_path"
 
 
 @dataclass
 class FileOperationResult:
     """Result of a file operation."""
+
     status: FileOperationStatus
     source_path: str
-    destination_path: Optional[str]
+    destination_path: str | None
     file_size: int
     file_hash: str
-    error_message: Optional[str]
+    error_message: str | None
 
     @property
     def is_success(self) -> bool:
@@ -73,7 +75,7 @@ class SecureFileHandler:
     # Buffer size for hash calculation (64KB)
     HASH_BUFFER_SIZE = 65536
 
-    def __init__(self, quarantine_directory: Optional[str] = None):
+    def __init__(self, quarantine_directory: str | None = None):
         """
         Initialize the SecureFileHandler.
 
@@ -98,7 +100,7 @@ class SecureFileHandler:
         """Get the quarantine directory path."""
         return self._quarantine_dir
 
-    def _ensure_quarantine_dir(self) -> Tuple[bool, Optional[str]]:
+    def _ensure_quarantine_dir(self) -> tuple[bool, str | None]:
         """
         Ensure the quarantine directory exists with proper permissions.
 
@@ -113,9 +115,7 @@ class SecureFileHandler:
             # Use mode= parameter to set permissions atomically, avoiding TOCTOU race
             # Note: mode is modified by umask, so we also call chmod after
             self._quarantine_dir.mkdir(
-                parents=True,
-                exist_ok=True,
-                mode=self.QUARANTINE_DIR_PERMISSIONS
+                parents=True, exist_ok=True, mode=self.QUARANTINE_DIR_PERMISSIONS
             )
 
             # Ensure restrictive permissions even if umask modified them
@@ -128,7 +128,7 @@ class SecureFileHandler:
         except OSError as e:
             return (False, f"Error creating quarantine directory: {e}")
 
-    def calculate_hash(self, file_path: Path) -> Tuple[Optional[str], Optional[str]]:
+    def calculate_hash(self, file_path: Path) -> tuple[str | None, str | None]:
         """
         Calculate SHA256 hash of a file for integrity verification.
 
@@ -165,7 +165,7 @@ class SecureFileHandler:
         except OSError as e:
             return (None, f"Error reading file: {e}")
 
-    def get_file_size(self, file_path: Path) -> Tuple[int, Optional[str]]:
+    def get_file_size(self, file_path: Path) -> tuple[int, str | None]:
         """
         Get the size of a file in bytes.
 
@@ -207,7 +207,7 @@ class SecureFileHandler:
         original_name = original_path.name
         return f"{unique_id}_{original_name}"
 
-    def _check_disk_space(self, file_size: int) -> Tuple[bool, Optional[str]]:
+    def _check_disk_space(self, file_size: int) -> tuple[bool, str | None]:
         """
         Check if there's enough disk space for the quarantine operation.
 
@@ -231,10 +231,122 @@ class SecureFileHandler:
         except OSError as e:
             return (False, f"Error checking disk space: {e}")
 
+    def validate_restore_path(self, restore_path: str) -> tuple[bool, str | None]:
+        """
+        Validate a restore destination path for security.
+
+        Checks that the restore path:
+        1. Doesn't contain injection characters (newlines, null bytes)
+        2. Doesn't point to protected system directories
+        3. Resolves to a safe user-accessible location
+        4. Symlinks in the path don't escape to protected directories
+
+        This validation prevents attacks where a malicious actor could
+        modify the quarantine database to restore files to system locations.
+
+        Args:
+            restore_path: The destination path to validate
+
+        Returns:
+            Tuple of (is_valid, error_message):
+            - (True, None) if path is safe for restore
+            - (False, error_message) if path is unsafe
+
+        Example:
+            >>> handler = SecureFileHandler()
+            >>> is_valid, error = handler.validate_restore_path("/home/user/file.txt")
+            >>> if is_valid:
+            ...     print("Path is safe for restore")
+
+            >>> is_valid, error = handler.validate_restore_path("/etc/passwd")
+            >>> print(error)  # "Restore to protected system directory not allowed: /etc"
+        """
+        # Check for empty path
+        if not restore_path or not restore_path.strip():
+            return (False, "Restore path cannot be empty")
+
+        # Security check: Reject paths with injection characters
+        # These could be used to bypass validation or manipulate the filesystem
+        if "\n" in restore_path or "\r" in restore_path:
+            return (False, "Restore path contains illegal newline characters")
+
+        if "\0" in restore_path:
+            return (False, "Restore path contains illegal null bytes")
+
+        # Convert to Path object for validation
+        try:
+            path_obj = Path(restore_path)
+        except (ValueError, TypeError) as e:
+            return (False, f"Invalid path format: {e}")
+
+        # Define protected system directories that should never be restore targets
+        # These directories contain critical system files and configuration
+        protected_dirs = [
+            Path("/etc"),  # System configuration
+            Path("/var"),  # Variable data (includes system databases)
+            Path("/usr"),  # System binaries and libraries
+            Path("/bin"),  # Essential binaries
+            Path("/sbin"),  # System binaries
+            Path("/lib"),  # System libraries
+            Path("/lib64"),  # 64-bit system libraries
+            Path("/boot"),  # Boot files
+            Path("/root"),  # Root user's home
+            Path("/sys"),  # System virtual filesystem
+            Path("/proc"),  # Process information virtual filesystem
+        ]
+
+        # Resolve the path to handle .. and symlinks
+        try:
+            resolved_path = path_obj.resolve()
+        except (OSError, RuntimeError) as e:
+            return (False, f"Cannot resolve restore path: {e}")
+
+        # Check if the resolved path is under any protected directory
+        for protected_dir in protected_dirs:
+            try:
+                # Check if resolved path is relative to (inside) the protected directory
+                resolved_path.relative_to(protected_dir)
+                # If we get here, the path IS inside the protected directory
+                return (
+                    False,
+                    f"Restore to protected system directory not allowed: {protected_dir}",
+                )
+            except ValueError:
+                # Path is not relative to this protected directory, continue checking
+                pass
+
+        # Check each component of the path for symlinks that might escape
+        # to protected directories
+        current_path = Path("/")
+        for part in path_obj.parts[1:]:  # Skip the root "/"
+            current_path = current_path / part
+
+            # If this component is a symlink, check where it resolves to
+            if current_path.is_symlink():
+                try:
+                    symlink_target = current_path.resolve()
+
+                    # Check if the symlink target is in a protected directory
+                    for protected_dir in protected_dirs:
+                        try:
+                            symlink_target.relative_to(protected_dir)
+                            return (
+                                False,
+                                f"Path contains symlink to protected directory: "
+                                f"{current_path} -> {symlink_target}",
+                            )
+                        except ValueError:
+                            # Not in this protected directory, continue
+                            pass
+
+                except (OSError, RuntimeError) as e:
+                    return (False, f"Error resolving symlink in path: {e}")
+
+        # Path passed all security checks
+        return (True, None)
+
     def move_to_quarantine(
-        self,
-        source_path: str,
-        threat_name: Optional[str] = None
+        self, source_path: str, threat_name: str | None = None
     ) -> FileOperationResult:
         """
         Move a file to the quarantine directory securely.
@@ -276,7 +388,7 @@ class SecureFileHandler:
                     error_message=(
                         f"Cannot quarantine symlinks for security reasons: "
                         f"{source_path} -> {target}"
-                    )
+                    ),
                 )
 
             source = source_path_obj.resolve()
@@ -289,7 +401,7 @@ class SecureFileHandler:
                     destination_path=None,
                     file_size=0,
                     file_hash="",
-                    error_message=f"Source file not found: {source}"
+                    error_message=f"Source file not found: {source}",
                 )
 
             # Check if it's a file (not directory)
@@ -300,7 +412,7 @@ class SecureFileHandler:
                     destination_path=None,
                     file_size=0,
                     file_hash="",
-                    error_message=f"Source is not a file: {source}"
+                    error_message=f"Source is not a file: {source}",
                 )
 
             # Get file size
@@ -312,7 +424,7 @@ class SecureFileHandler:
                     destination_path=None,
                     file_size=0,
                     file_hash="",
-                    error_message=size_error
+                    error_message=size_error,
                 )
 
             # Calculate hash before moving
@@ -324,7 +436,7 @@ class SecureFileHandler:
                     destination_path=None,
                     file_size=file_size,
                     file_hash="",
-                    error_message=hash_error
+                    error_message=hash_error,
                 )
 
             # Ensure quarantine directory exists
@@ -336,7 +448,7 @@ class SecureFileHandler:
                     destination_path=None,
                     file_size=file_size,
                     file_hash=file_hash or "",
-                    error_message=dir_error
+                    error_message=dir_error,
                 )
 
             # Check disk space
@@ -348,7 +460,7 @@ class SecureFileHandler:
                     destination_path=None,
                     file_size=file_size,
                     file_hash=file_hash or "",
-                    error_message=space_error
+                    error_message=space_error,
                 )
 
             # Generate unique quarantine filename
@@ -363,7 +475,7 @@ class SecureFileHandler:
                     destination_path=str(destination),
                     file_size=file_size,
                     file_hash=file_hash or "",
-                    error_message=f"Destination already exists: {destination}"
+                    error_message=f"Destination already exists: {destination}",
                 )
 
             try:
@@ -379,7 +491,7 @@ class SecureFileHandler:
                     destination_path=str(destination),
                     file_size=file_size,
                     file_hash=file_hash or "",
-                    error_message=None
+                    error_message=None,
                 )
 
             except PermissionError as e:
@@ -389,7 +501,7 @@ class SecureFileHandler:
                     destination_path=None,
                     file_size=file_size,
                     file_hash=file_hash or "",
-                    error_message=f"Permission denied during move: {e}"
+                    error_message=f"Permission denied during move: {e}",
                 )
             except shutil.Error as e:
                 return FileOperationResult(
@@ -398,7 +510,7 @@ class SecureFileHandler:
                     destination_path=None,
                     file_size=file_size,
                     file_hash=file_hash or "",
-                    error_message=f"Move operation failed: {e}"
+                    error_message=f"Move operation failed: {e}",
                 )
             except OSError as e:
                 return FileOperationResult(
@@ -407,13 +519,11 @@ class SecureFileHandler:
                     destination_path=None,
                     file_size=file_size,
                     file_hash=file_hash or "",
-                    error_message=f"File operation error: {e}"
+                    error_message=f"File operation error: {e}",
                 )
 
     def restore_from_quarantine(
-        self,
-        quarantine_path: str,
-        original_path: str
+        self, quarantine_path: str, original_path: str
     ) -> FileOperationResult:
         """
         Restore a file from quarantine to its original location.
@@ -441,9 +551,22 @@ class SecureFileHandler:
             ...     print(f"Restored to: {result.destination_path}")
         """
         source = Path(quarantine_path).resolve()
-        destination = Path(original_path).resolve()
 
         with self._lock:
+            # Validate restore destination path for security
+            is_valid, validation_error = self.validate_restore_path(original_path)
+            if not is_valid:
+                return FileOperationResult(
+                    status=FileOperationStatus.INVALID_RESTORE_PATH,
+                    source_path=str(source),
+                    destination_path=original_path,
+                    file_size=0,
+                    file_hash="",
+                    error_message=validation_error,
+                )
+
+            destination = Path(original_path).resolve()
+
             # Validate quarantine file exists
             if not source.exists():
                 return FileOperationResult(
@@ -452,7 +575,7 @@ class SecureFileHandler:
                     destination_path=str(destination),
                     file_size=0,
                     file_hash="",
-                    error_message=f"Quarantine file not found: {source}"
+                    error_message=f"Quarantine file not found: {source}",
                 )
 
             # Get file size
@@ -473,7 +596,7 @@ class SecureFileHandler:
                     destination_path=str(destination),
                     file_size=file_size,
                     file_hash=file_hash or "",
-                    error_message=f"Cannot create destination directory: {e}"
+                    error_message=f"Cannot create destination directory: {e}",
                 )
             except OSError as e:
                 return FileOperationResult(
@@ -482,7 +605,7 @@ class SecureFileHandler:
                     destination_path=str(destination),
                     file_size=file_size,
                     file_hash=file_hash or "",
-                    error_message=f"Error creating destination directory: {e}"
+                    error_message=f"Error creating destination directory: {e}",
                 )
 
             # Check if destination already exists
@@ -493,7 +616,7 @@ class SecureFileHandler:
                     destination_path=str(destination),
                     file_size=file_size,
                     file_hash=file_hash or "",
-                    error_message=f"Destination file already exists: {destination}"
+                    error_message=f"Destination file already exists: {destination}",
                 )
 
             try:
@@ -513,7 +636,7 @@ class SecureFileHandler:
                     destination_path=str(destination),
                     file_size=file_size,
                     file_hash=file_hash or "",
-                    error_message=None
+                    error_message=None,
                 )
 
             except PermissionError as e:
@@ -523,7 +646,7 @@ class SecureFileHandler:
                     destination_path=str(destination),
                     file_size=file_size,
                     file_hash=file_hash or "",
-                    error_message=f"Permission denied during restore: {e}"
+                    error_message=f"Permission denied during restore: {e}",
                 )
             except shutil.Error as e:
                 return FileOperationResult(
@@ -532,7 +655,7 @@ class SecureFileHandler:
                     destination_path=str(destination),
                     file_size=file_size,
                     file_hash=file_hash or "",
-                    error_message=f"Restore operation failed: {e}"
+                    error_message=f"Restore operation failed: {e}",
                 )
             except OSError as e:
                 return FileOperationResult(
@@ -541,7 +664,7 @@ class SecureFileHandler:
                     destination_path=str(destination),
                     file_size=file_size,
                     file_hash=file_hash or "",
-                    error_message=f"File operation error: {e}"
+                    error_message=f"File operation error: {e}",
                 )
 
     def delete_quarantined_file(self, quarantine_path: str) -> FileOperationResult:
@@ -576,7 +699,7 @@ class SecureFileHandler:
                     destination_path=None,
                     file_size=0,
                     file_hash="",
-                    error_message=f"File not found: {target}"
+                    error_message=f"File not found: {target}",
                 )
 
             # Verify file is in quarantine directory (security check)
@@ -589,7 +712,7 @@ class SecureFileHandler:
                     destination_path=None,
                     file_size=0,
                     file_hash="",
-                    error_message="File is not in quarantine directory"
+                    error_message="File is not in quarantine directory",
                 )
 
             # Get file info before deletion
@@ -609,7 +732,7 @@ class SecureFileHandler:
                     destination_path=None,
                     file_size=file_size if file_size > 0 else 0,
                     file_hash=file_hash or "",
-                    error_message=None
+                    error_message=None,
                 )
 
             except PermissionError as e:
@@ -619,7 +742,7 @@ class SecureFileHandler:
                     destination_path=None,
                     file_size=file_size if file_size > 0 else 0,
                     file_hash=file_hash or "",
-                    error_message=f"Permission denied deleting file: {e}"
+                    error_message=f"Permission denied deleting file: {e}",
                 )
             except OSError as e:
                 return FileOperationResult(
@@ -628,14 +751,10 @@ class SecureFileHandler:
                     destination_path=None,
                     file_size=file_size if file_size > 0 else 0,
                     file_hash=file_hash or "",
-                    error_message=f"Error deleting file: {e}"
+                    error_message=f"Error deleting file: {e}",
                 )
 
-    def verify_file_integrity(
-        self,
-        file_path: str,
-        expected_hash: str
-    ) -> Tuple[bool, Optional[str]]:
+    def verify_file_integrity(self, file_path: str, expected_hash: str) -> tuple[bool, str | None]:
         """
         Verify the integrity of a file by comparing its hash.
 
@@ -686,27 +805,27 @@ class SecureFileHandler:
             - 'permissions': Directory permissions as octal string
         """
         info = {
-            'path': str(self._quarantine_dir),
-            'exists': self._quarantine_dir.exists(),
-            'file_count': 0,
-            'total_size': 0,
-            'permissions': None
+            "path": str(self._quarantine_dir),
+            "exists": self._quarantine_dir.exists(),
+            "file_count": 0,
+            "total_size": 0,
+            "permissions": None,
         }
 
-        if not info['exists']:
+        if not info["exists"]:
             return info
 
         try:
             # Get directory permissions
             stat_info = self._quarantine_dir.stat()
-            info['permissions'] = oct(stat_info.st_mode)[-3:]
+            info["permissions"] = oct(stat_info.st_mode)[-3:]
 
             # Count files and calculate total size
             for file_path in self._quarantine_dir.iterdir():
                 if file_path.is_file():
-                    info['file_count'] += 1
+                    info["file_count"] += 1
                     try:
-                        info['total_size'] += file_path.stat().st_size
+                        info["total_size"] += file_path.stat().st_size
                     except OSError:
                         pass
 

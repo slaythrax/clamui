@@ -11,16 +11,15 @@ Orchestrates the QuarantineDatabase and SecureFileHandler to provide:
 """
 
 import threading
+from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Callable, Optional
 
 from gi.repository import GLib
 
 from .database import QuarantineDatabase, QuarantineEntry
 from .file_handler import (
-    FileOperationResult,
     FileOperationStatus,
     SecureFileHandler,
 )
@@ -37,6 +36,7 @@ class QuarantineStatus(Enum):
     ALREADY_QUARANTINED = "already_quarantined"
     ENTRY_NOT_FOUND = "entry_not_found"
     RESTORE_DESTINATION_EXISTS = "restore_destination_exists"
+    INVALID_RESTORE_PATH = "invalid_restore_path"
     ERROR = "error"
 
 
@@ -45,8 +45,8 @@ class QuarantineResult:
     """Result of a quarantine operation."""
 
     status: QuarantineStatus
-    entry: Optional[QuarantineEntry]
-    error_message: Optional[str]
+    entry: QuarantineEntry | None
+    error_message: str | None
 
     @property
     def is_success(self) -> bool:
@@ -72,8 +72,8 @@ class QuarantineManager:
 
     def __init__(
         self,
-        quarantine_directory: Optional[str] = None,
-        database_path: Optional[str] = None,
+        quarantine_directory: str | None = None,
+        database_path: str | None = None,
     ):
         """
         Initialize the QuarantineManager.
@@ -134,9 +134,7 @@ class QuarantineManager:
                 )
 
             # Move file to quarantine
-            file_result = self._file_handler.move_to_quarantine(
-                source_str, threat_name
-            )
+            file_result = self._file_handler.move_to_quarantine(source_str, threat_name)
 
             if not file_result.is_success:
                 # Map file operation status to quarantine status
@@ -328,9 +326,7 @@ class QuarantineManager:
                 )
 
             # Delete the file
-            file_result = self._file_handler.delete_quarantined_file(
-                entry.quarantine_path
-            )
+            file_result = self._file_handler.delete_quarantined_file(entry.quarantine_path)
 
             if not file_result.is_success:
                 status = self._map_file_status(file_result.status)
@@ -376,7 +372,7 @@ class QuarantineManager:
         thread.daemon = True
         thread.start()
 
-    def get_entry(self, entry_id: int) -> Optional[QuarantineEntry]:
+    def get_entry(self, entry_id: int) -> QuarantineEntry | None:
         """
         Retrieve a specific quarantine entry by ID.
 
@@ -388,7 +384,7 @@ class QuarantineManager:
         """
         return self._database.get_entry(entry_id)
 
-    def get_entry_by_original_path(self, original_path: str) -> Optional[QuarantineEntry]:
+    def get_entry_by_original_path(self, original_path: str) -> QuarantineEntry | None:
         """
         Retrieve a quarantine entry by original file path.
 
@@ -484,9 +480,7 @@ class QuarantineManager:
 
         for entry in old_entries:
             # Delete the file
-            file_result = self._file_handler.delete_quarantined_file(
-                entry.quarantine_path
-            )
+            file_result = self._file_handler.delete_quarantined_file(entry.quarantine_path)
 
             # Remove from database regardless of file deletion result
             # (file may already be deleted)
@@ -522,7 +516,7 @@ class QuarantineManager:
         thread.daemon = True
         thread.start()
 
-    def verify_entry_integrity(self, entry_id: int) -> tuple[bool, Optional[str]]:
+    def verify_entry_integrity(self, entry_id: int) -> tuple[bool, str | None]:
         """
         Verify the integrity of a quarantined file.
 
@@ -541,9 +535,7 @@ class QuarantineManager:
         if entry is None:
             return (False, f"Quarantine entry not found: {entry_id}")
 
-        return self._file_handler.verify_file_integrity(
-            entry.quarantine_path, entry.file_hash
-        )
+        return self._file_handler.verify_file_integrity(entry.quarantine_path, entry.file_hash)
 
     def get_quarantine_info(self) -> dict:
         """
@@ -585,6 +577,7 @@ class QuarantineManager:
             FileOperationStatus.PERMISSION_DENIED: QuarantineStatus.PERMISSION_DENIED,
             FileOperationStatus.DISK_FULL: QuarantineStatus.DISK_FULL,
             FileOperationStatus.ALREADY_EXISTS: QuarantineStatus.ALREADY_QUARANTINED,
+            FileOperationStatus.INVALID_RESTORE_PATH: QuarantineStatus.INVALID_RESTORE_PATH,
             FileOperationStatus.ERROR: QuarantineStatus.ERROR,
         }
         return status_map.get(file_status, QuarantineStatus.ERROR)
