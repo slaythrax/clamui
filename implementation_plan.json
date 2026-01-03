@@ -1,55 +1,80 @@
 {
-  "spec": "019-scan-statistics-dashboard",
+  "spec": "069-add-to-the-configuration-the-clamav-daemon-configu",
   "subtasks": [
     {
       "id": "subtask-1-1",
-      "title": "Create StatisticsCalculator class with timeframe aggregation",
-      "status": "completed"
-    },
-    {
-      "id": "subtask-1-2",
-      "title": "Add unit tests for statistics calculation logic",
+      "title": "Add On-Access configuration option types to CONFIG_OPTION_TYPES",
       "status": "completed"
     },
     {
       "id": "subtask-2-1",
-      "title": "Create StatisticsView class following existing view patterns",
+      "title": "Create _create_onaccess_page() method",
       "status": "completed"
     },
     {
       "id": "subtask-2-2",
-      "title": "Add matplotlib chart visualization for GTK4",
+      "title": "Create _create_onaccess_paths_group() method",
+      "status": "completed"
+    },
+    {
+      "id": "subtask-2-3",
+      "title": "Create _create_onaccess_behavior_group() method",
+      "status": "completed"
+    },
+    {
+      "id": "subtask-2-4",
+      "title": "Create _create_onaccess_performance_group() method",
+      "status": "completed"
+    },
+    {
+      "id": "subtask-2-5",
+      "title": "Create _create_onaccess_exclusions_group() method",
       "status": "completed"
     },
     {
       "id": "subtask-3-1",
-      "title": "Add statistics navigation button to main window header",
+      "title": "Create _populate_onaccess_fields() method",
       "status": "completed"
     },
     {
       "id": "subtask-3-2",
-      "title": "Register statistics view and action in main app",
+      "title": "Create _collect_onaccess_data() method",
       "status": "completed"
     },
     {
       "id": "subtask-4-1",
-      "title": "Create UI tests for StatisticsView component",
+      "title": "Update _setup_ui() to include On-Access page",
       "status": "completed"
     },
     {
       "id": "subtask-4-2",
-      "title": "Implement empty state and error handling",
+      "title": "Update _save_configs_thread() to include On-Access settings",
+      "status": "completed"
+    },
+    {
+      "id": "subtask-5-1",
+      "title": "Add unit tests for On-Access page creation",
+      "status": "completed"
+    },
+    {
+      "id": "subtask-5-2",
+      "title": "Add unit tests for _populate_onaccess_fields()",
+      "status": "completed"
+    },
+    {
+      "id": "subtask-5-3",
+      "title": "Add unit tests for _collect_onaccess_data()",
       "status": "completed"
     }
   ],
   "qa_signoff": {
     "status": "fixes_applied",
-    "timestamp": "2025-12-31T15:55:00.000Z",
+    "timestamp": "2026-01-03T16:00:00.000Z",
     "fix_session": 0,
     "issues_fixed": [
       {
-        "title": "Quick Scan pre-selects home directory in statistics view",
-        "fix_commit": "be63213"
+        "title": "MaxEmbeddedPE validation error: Invalid integer value for size option",
+        "fix_commit": "f8235e2"
       }
     ],
     "ready_for_qa_revalidation": true
