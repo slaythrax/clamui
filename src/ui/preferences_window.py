@@ -1516,6 +1516,112 @@ class PreferencesWindow(Adw.PreferencesWindow):
                 self._clamd_config.get_value('LogSyslog').lower() == 'yes'
             )
 
+        # Populate On-Access fields (also from clamd.conf)
+        self._populate_onaccess_fields()
+
+    def _populate_onaccess_fields(self):
+        """
+        Populate On-Access configuration fields from loaded clamd.conf config.
+
+        Updates UI widgets with On-Access scanning values from the parsed
+        clamd.conf file. On-Access settings control real-time file monitoring
+        via clamonacc.
+        """
+        if not self._clamd_config:
+            return
+
+        # Populate OnAccessIncludePath (comma-separated paths)
+        if self._clamd_config.has_key('OnAccessIncludePath'):
+            values = self._clamd_config.get_values('OnAccessIncludePath')
+            if values:
+                self._onaccess_widgets['OnAccessIncludePath'].set_text(
+                    ', '.join(values)
+                )
+
+        # Populate OnAccessExcludePath (comma-separated paths)
+        if self._clamd_config.has_key('OnAccessExcludePath'):
+            values = self._clamd_config.get_values('OnAccessExcludePath')
+            if values:
+                self._onaccess_widgets['OnAccessExcludePath'].set_text(
+                    ', '.join(values)
+                )
+
+        # Populate OnAccessPrevention (switch)
+        if self._clamd_config.has_key('OnAccessPrevention'):
+            self._onaccess_widgets['OnAccessPrevention'].set_active(
+                self._clamd_config.get_value('OnAccessPrevention').lower() == 'yes'
+            )
+
+        # Populate OnAccessExtraScanning (switch)
+        if self._clamd_config.has_key('OnAccessExtraScanning'):
+            self._onaccess_widgets['OnAccessExtraScanning'].set_active(
+                self._clamd_config.get_value('OnAccessExtraScanning').lower() == 'yes'
+            )
+
+        # Populate OnAccessDenyOnError (switch)
+        if self._clamd_config.has_key('OnAccessDenyOnError'):
+            self._onaccess_widgets['OnAccessDenyOnError'].set_active(
+                self._clamd_config.get_value('OnAccessDenyOnError').lower() == 'yes'
+            )
+
+        # Populate OnAccessDisableDDD (switch)
+        if self._clamd_config.has_key('OnAccessDisableDDD'):
+            self._onaccess_widgets['OnAccessDisableDDD'].set_active(
+                self._clamd_config.get_value('OnAccessDisableDDD').lower() == 'yes'
+            )
+
+        # Populate OnAccessMaxThreads (spin)
+        if self._clamd_config.has_key('OnAccessMaxThreads'):
+            try:
+                threads_value = int(self._clamd_config.get_value('OnAccessMaxThreads'))
+                self._onaccess_widgets['OnAccessMaxThreads'].set_value(threads_value)
+            except (ValueError, TypeError):
+                pass
+
+        # Populate OnAccessMaxFileSize (spin, in MB)
+        if self._clamd_config.has_key('OnAccessMaxFileSize'):
+            try:
+                size_value = int(self._clamd_config.get_value('OnAccessMaxFileSize'))
+                self._onaccess_widgets['OnAccessMaxFileSize'].set_value(size_value)
+            except (ValueError, TypeError):
+                pass
+
+        # Populate OnAccessCurlTimeout (spin, in seconds)
+        if self._clamd_config.has_key('OnAccessCurlTimeout'):
+            try:
+                timeout_value = int(self._clamd_config.get_value('OnAccessCurlTimeout'))
+                self._onaccess_widgets['OnAccessCurlTimeout'].set_value(timeout_value)
+            except (ValueError, TypeError):
+                pass
+
+        # Populate OnAccessRetryAttempts (spin)
+        if self._clamd_config.has_key('OnAccessRetryAttempts'):
+            try:
+                retry_value = int(self._clamd_config.get_value('OnAccessRetryAttempts'))
+                self._onaccess_widgets['OnAccessRetryAttempts'].set_value(retry_value)
+            except (ValueError, TypeError):
+                pass
+
+        # Populate OnAccessExcludeUname (entry)
+        if self._clamd_config.has_key('OnAccessExcludeUname'):
+            self._onaccess_widgets['OnAccessExcludeUname'].set_text(
+                self._clamd_config.get_value('OnAccessExcludeUname')
+            )
+
+        # Populate OnAccessExcludeUID (spin)
+        if self._clamd_config.has_key('OnAccessExcludeUID'):
+            try:
+                uid_value = int(self._clamd_config.get_value('OnAccessExcludeUID'))
+                self._onaccess_widgets['OnAccessExcludeUID'].set_value(uid_value)
+            except (ValueError, TypeError):
+                pass
+
+        # Populate OnAccessExcludeRootUID (switch)
+        if self._clamd_config.has_key('OnAccessExcludeRootUID'):
+            self._onaccess_widgets['OnAccessExcludeRootUID'].set_active(
+                self._clamd_config.get_value('OnAccessExcludeRootUID').lower() == 'yes'
+            )
+
     def _on_save_clicked(self, button: Gtk.Button):
         """
         Handle save button click event.
