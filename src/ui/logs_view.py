@@ -766,6 +766,38 @@ class LogsView(Gtk.Box):
 
         lines.append("")
 
+        # Statistics Summary (for scan logs only)
+        if entry.type == "scan":
+            stats = self._statistics_calculator.extract_entry_statistics(entry)
+
+            # Only show statistics section if we have meaningful data
+            if stats["files_scanned"] > 0 or stats["directories_scanned"] > 0 or stats["duration"] > 0:
+                lines.append("Statistics Summary:")
+                lines.append("-" * 50)
+
+                if stats["files_scanned"] > 0:
+                    lines.append(f"  Files Scanned: {stats['files_scanned']:,}")
+
+                if stats["directories_scanned"] > 0:
+                    lines.append(f"  Directories Scanned: {stats['directories_scanned']:,}")
+
+                if stats["duration"] > 0:
+                    # Format duration nicely
+                    duration = stats["duration"]
+                    if duration < 60:
+                        duration_str = f"{duration:.2f} seconds"
+                    elif duration < 3600:
+                        minutes = int(duration // 60)
+                        seconds = duration % 60
+                        duration_str = f"{minutes}m {seconds:.0f}s"
+                    else:
+                        hours = int(duration // 3600)
+                        minutes = int((duration % 3600) // 60)
+                        duration_str = f"{hours}h {minutes}m"
+                    lines.append(f"  Duration: {duration_str}")
+
+                lines.append("")
+
         # Summary
         lines.append("Summary:")
         lines.append(f"  {entry.summary}")
