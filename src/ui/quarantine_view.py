@@ -353,27 +353,16 @@ class QuarantineView(Gtk.Box):
                     self._clear_old_button.set_sensitive(True)
                     return False
 
-                # Display filtered results with pagination
-                entries_to_display = self._filtered_entries
-            else:
-                # No search active, display all entries
-                entries_to_display = entries
+            # Get the appropriate entry list for display
+            entries_to_display = self._entries_to_display
 
             # Display initial batch with pagination
             initial_limit = min(INITIAL_DISPLAY_LIMIT, len(entries_to_display))
+            self._display_entry_batch(0, initial_limit)
 
-            # Temporarily swap entries for display
-            original_entries = self._all_entries
-            self._all_entries = entries_to_display
-            try:
-                self._display_entry_batch(0, initial_limit)
-
-                # Add "Load More" button if there are more entries
-                if len(entries_to_display) > INITIAL_DISPLAY_LIMIT:
-                    self._add_load_more_button()
-            finally:
-                # Restore original entries
-                self._all_entries = original_entries
+            # Add "Load More" button if there are more entries
+            if len(entries_to_display) > INITIAL_DISPLAY_LIMIT:
+                self._add_load_more_button()
 
             # Enable clear old button if there are entries
             self._clear_old_button.set_sensitive(True)
@@ -388,18 +377,37 @@ class QuarantineView(Gtk.Box):
 
         return False
 
+    @property
+    def _entries_to_display(self) -> list[QuarantineEntry]:
+        """
+        Get the appropriate entry list for display.
+
+        Returns _filtered_entries when search is active (non-empty search query),
+        otherwise returns _all_entries.
+
+        Returns:
+            List of QuarantineEntry objects to display
+        """
+        if self._search_query:
+            return self._filtered_entries
+        return self._all_entries
+
     def _display_entry_batch(self, start_index: int, count: int):
         """
         Display a batch of entry rows starting from the given index.
 
+        Uses _entries_to_display property to determine which list to use
+        based on whether search is active.
+
         Args:
-            start_index: Index in _all_entries to start from
+            start_index: Index in entry list to start from
             count: Number of entries to display
         """
-        end_index = min(start_index + count, len(self._all_entries))
+        entries = self._entries_to_display
+        end_index = min(start_index + count, len(entries))
 
         for i in range(start_index, end_index):
-            entry = self._all_entries[i]
+            entry = entries[i]
             try:
                 row = self._create_entry_row(entry)
                 # Insert before the "Load More" button if it exists
@@ -420,12 +428,15 @@ class QuarantineView(Gtk.Box):
         load_more_box.set_margin_top(12)
         load_more_box.set_margin_bottom(12)
 
+        # Get the appropriate entry list
+        entries = self._entries_to_display
+
         # Progress label
-        remaining = len(self._all_entries) - self._displayed_count
+        remaining = len(entries) - self._displayed_count
         progress_label = Gtk.Label()
         progress_label.set_markup(
             f"<span size='small'>Showing {self._displayed_count} of "
-            f"{len(self._all_entries)} entries</span>"
+            f"{len(entries)} entries</span>"
         )
         progress_label.add_css_class("dim-label")
         load_more_box.append(progress_label)
@@ -471,11 +482,12 @@ class QuarantineView(Gtk.Box):
             self._listbox.remove(self._load_more_row)
             self._load_more_row = None
 
-        remaining = len(self._all_entries) - self._displayed_count
+        entries = self._entries_to_display
+        remaining = len(entries) - self._displayed_count
         batch_size = min(LOAD_MORE_BATCH_SIZE, remaining)
         self._display_entry_batch(self._displayed_count, batch_size)
 
-        if self._displayed_count < len(self._all_entries):
+        if self._displayed_count < len(entries):
             self._add_load_more_button()
 
         # Restore scroll position after layout
@@ -494,7 +506,8 @@ class QuarantineView(Gtk.Box):
             self._listbox.remove(self._load_more_row)
             self._load_more_row = None
 
-        remaining = len(self._all_entries) - self._displayed_count
+        entries = self._entries_to_display
+        remaining = len(entries) - self._displayed_count
         self._display_entry_batch(self._displayed_count, remaining)
 
         # Restore scroll position after layout
@@ -606,22 +619,16 @@ class QuarantineView(Gtk.Box):
         if not self._filtered_entries:
             return
 
-        # Temporarily use filtered entries for display
-        # (Will be refactored in phase 4 to use proper entry source detection)
-        original_entries = self._all_entries
-        self._all_entries = self._filtered_entries
+        # Get the appropriate entry list for display
+        entries_to_display = self._entries_to_display
 
-        try:
-            # Display initial batch with pagination
-            initial_limit = min(INITIAL_DISPLAY_LIMIT, len(self._filtered_entries))
-            self._display_entry_batch(0, initial_limit)
+        # Display initial batch with pagination
+        initial_limit = min(INITIAL_DISPLAY_LIMIT, len(entries_to_display))
+        self._display_entry_batch(0, initial_limit)
 
-            # Add "Load More" button if there are more entries
-            if len(self._filtered_entries) > INITIAL_DISPLAY_LIMIT:
-                self._add_load_more_button()
-        finally:
-            # Restore original entries
-            self._all_entries = original_entries
+        # Add "Load More" button if there are more entries
+        if len(entries_to_display) > INITIAL_DISPLAY_LIMIT:
+            self._add_load_more_button()
 
     def _on_cleanup_completed(self, removed_count: int) -> bool:
         """
