@@ -90,6 +90,7 @@ class QuarantineView(Gtk.Box):
         # Search/filter state
         self._search_query: str = ""
         self._filtered_entries: list[QuarantineEntry] = []
+        self._search_timeout_id: int | None = None
 
         # Callback for quarantine content changes (for external notification)
         self._on_quarantine_changed = None
@@ -491,13 +492,42 @@ class QuarantineView(Gtk.Box):
 
     def _on_search_changed(self, search_entry):
         """
-        Handle search entry text change.
+        Handle search entry text change with debouncing.
+
+        Cancels any pending search and schedules a new one after 250ms delay
+        to avoid filtering on every keystroke.
 
         Args:
             search_entry: The Gtk.SearchEntry widget
         """
-        # Placeholder for search functionality (to be implemented in later subtasks)
-        pass
+        # Cancel any pending search timeout
+        if self._search_timeout_id is not None:
+            GLib.source_remove(self._search_timeout_id)
+            self._search_timeout_id = None
+
+        # Get the current search query
+        self._search_query = search_entry.get_text().strip()
+
+        # Schedule filter update after 250ms delay
+        self._search_timeout_id = GLib.timeout_add(250, self._execute_search_filter)
+
+    def _execute_search_filter(self) -> bool:
+        """
+        Execute the search filter operation.
+
+        This is the callback invoked after the debounce delay. Applies the
+        current search filter to the quarantine list.
+
+        Returns:
+            False to prevent GLib.timeout_add from repeating
+        """
+        # Clear timeout ID since the timeout has been consumed
+        self._search_timeout_id = None
+
+        # Apply the search filter
+        self._apply_search_filter()
+
+        return False
 
     def _filter_entries(self) -> list[QuarantineEntry]:
         """
