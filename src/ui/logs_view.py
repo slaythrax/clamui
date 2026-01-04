@@ -12,6 +12,7 @@ gi.require_version("Adw", "1")
 from gi.repository import Adw, Gio, GLib, Gtk
 
 from ..core.log_manager import DaemonStatus, LogEntry, LogManager
+from ..core.statistics_calculator import StatisticsCalculator
 from ..core.utils import copy_to_clipboard
 from .fullscreen_dialog import FullscreenLogDialog
 from .utils import add_row_icon
@@ -45,6 +46,9 @@ class LogsView(Gtk.Box):
 
         # Initialize log manager
         self._log_manager = LogManager()
+
+        # Initialize statistics calculator
+        self._statistics_calculator = StatisticsCalculator(log_manager=self._log_manager)
 
         # Currently selected log entry
         self._selected_log: LogEntry | None = None
