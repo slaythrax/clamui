@@ -289,6 +289,9 @@ class TestQuarantineViewEntriesLoaded:
         view._on_quarantine_changed = None
         view._last_refresh_time = 0.0
         view._manager = mock.MagicMock()
+        # Initialize search state
+        view._search_query = ""
+        view._filtered_entries = []
 
         entries = [mock_quarantine_entry]
         view._on_entries_loaded(entries)
@@ -311,6 +314,9 @@ class TestQuarantineViewEntriesLoaded:
         view._add_load_more_button = mock.MagicMock()
         view._last_refresh_time = 0.0
         view._manager = mock.MagicMock()
+        # Initialize search state
+        view._search_query = ""
+        view._filtered_entries = []
 
         callback = mock.MagicMock()
         view._on_quarantine_changed = callback
@@ -334,6 +340,9 @@ class TestQuarantineViewPagination:
         view._load_more_row = None
         view._listbox = mock.MagicMock()
         view._create_entry_row = mock.MagicMock(return_value=mock.MagicMock())
+        # Initialize search state
+        view._search_query = ""
+        view._filtered_entries = []
 
         view._display_entry_batch(0, 2)
 
@@ -366,6 +375,9 @@ class TestQuarantineViewPagination:
         view._load_more_row = mock.MagicMock()
         view._listbox = mock.MagicMock()
         view._display_entry_batch = mock.MagicMock()
+        # Initialize search state
+        view._search_query = ""
+        view._filtered_entries = []
 
         view._on_show_all_clicked(mock.MagicMock())
 
@@ -386,6 +398,9 @@ class TestQuarantineViewStorageInfo:
         view._manager.get_entry_count.return_value = 5
         view._storage_row = mock.MagicMock()
         view._count_label = mock.MagicMock()
+        # Initialize search state (no active search)
+        view._search_query = ""
+        view._filtered_entries = []
 
         # Create mock entries
         mock_entries = [mock.MagicMock(file_size=1024 * 200) for _ in range(5)]
@@ -404,6 +419,9 @@ class TestQuarantineViewStorageInfo:
         view._manager.get_entry_count.return_value = 1
         view._storage_row = mock.MagicMock()
         view._count_label = mock.MagicMock()
+        # Initialize search state (no active search)
+        view._search_query = ""
+        view._filtered_entries = []
 
         # Create mock entry
         mock_entries = [mock.MagicMock(file_size=512)]
@@ -976,6 +994,9 @@ def test_quarantine_view_basic(mock_gi_modules):
         view._manager.get_total_size.return_value = 2048
         view._storage_row = mock.MagicMock()
         view._count_label = mock.MagicMock()
+        # Initialize search state
+        view._search_query = ""
+        view._filtered_entries = []
 
         # Test _update_storage_info
         mock_entries = [mock.MagicMock(file_size=512) for _ in range(5)]
