@@ -154,15 +154,26 @@ class QuarantineView(Gtk.Box):
         list_group.set_description("Detected threats isolated from your system")
         self._list_group = list_group
 
-        # Header box with action buttons
+        # Header box with search and action buttons
         header_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
-        header_box.set_halign(Gtk.Align.END)
-        header_box.set_spacing(6)
+        header_box.set_spacing(12)
+
+        # Search entry
+        self._search_entry = Gtk.SearchEntry()
+        self._search_entry.set_placeholder_text("Search by threat name or path...")
+        self._search_entry.set_hexpand(True)
+        self._search_entry.connect("search-changed", self._on_search_changed)
+        header_box.append(self._search_entry)
+
+        # Action buttons box (right-aligned)
+        action_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
+        action_box.set_halign(Gtk.Align.END)
+        action_box.set_spacing(6)
 
         # Loading spinner (hidden by default)
         self._spinner = Gtk.Spinner()
         self._spinner.set_visible(False)
-        header_box.append(self._spinner)
+        action_box.append(self._spinner)
 
         # Refresh button
         refresh_button = Gtk.Button()
@@ -171,7 +182,7 @@ class QuarantineView(Gtk.Box):
         refresh_button.add_css_class("flat")
         refresh_button.connect("clicked", self._on_refresh_clicked)
         self._refresh_button = refresh_button
-        header_box.append(refresh_button)
+        action_box.append(refresh_button)
 
         # Clear old items button
         clear_old_button = Gtk.Button()
@@ -180,7 +191,9 @@ class QuarantineView(Gtk.Box):
         clear_old_button.add_css_class("flat")
         clear_old_button.connect("clicked", self._on_clear_old_clicked)
         self._clear_old_button = clear_old_button
-        header_box.append(clear_old_button)
+        action_box.append(clear_old_button)
+
+        header_box.append(action_box)
 
         list_group.set_header_suffix(header_box)
 
@@ -471,6 +484,16 @@ class QuarantineView(Gtk.Box):
     def _on_clear_old_clicked(self, button):
         """Handle clear old items button click."""
         self._manager.cleanup_old_entries_async(callback=self._on_cleanup_completed)
+
+    def _on_search_changed(self, search_entry):
+        """
+        Handle search entry text change.
+
+        Args:
+            search_entry: The Gtk.SearchEntry widget
+        """
+        # Placeholder for search functionality (to be implemented in later subtasks)
+        pass
 
     def _on_cleanup_completed(self, removed_count: int) -> bool:
         """
