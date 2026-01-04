@@ -652,9 +652,19 @@ class QuarantineView(Gtk.Box):
         self._displayed_count = 0
         self._load_more_row = None
 
-        # Handle empty filtered results - placeholder will be shown automatically
+        # Handle empty filtered results - show appropriate placeholder
         if not self._filtered_entries:
+            # If search is active but has no matches (all_entries exists but filtered is empty),
+            # show the no-results placeholder
+            if self._search_query and self._all_entries:
+                self._listbox.set_placeholder(self._create_no_results_state())
+            else:
+                # Otherwise show empty state placeholder (for when quarantine is actually empty)
+                self._listbox.set_placeholder(self._create_empty_state())
             return
+
+        # Results exist - ensure empty state placeholder is set (for when all entries are removed later)
+        self._listbox.set_placeholder(self._create_empty_state())
 
         # Get the appropriate entry list for display
         entries_to_display = self._entries_to_display
