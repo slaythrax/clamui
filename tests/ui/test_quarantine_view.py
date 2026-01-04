@@ -289,6 +289,9 @@ class TestQuarantineViewEntriesLoaded:
         view._on_quarantine_changed = None
         view._last_refresh_time = 0.0
         view._manager = mock.MagicMock()
+        # Initialize search state
+        view._search_query = ""
+        view._filtered_entries = []
 
         entries = [mock_quarantine_entry]
         view._on_entries_loaded(entries)
@@ -311,6 +314,9 @@ class TestQuarantineViewEntriesLoaded:
         view._add_load_more_button = mock.MagicMock()
         view._last_refresh_time = 0.0
         view._manager = mock.MagicMock()
+        # Initialize search state
+        view._search_query = ""
+        view._filtered_entries = []
 
         callback = mock.MagicMock()
         view._on_quarantine_changed = callback
@@ -334,6 +340,9 @@ class TestQuarantineViewPagination:
         view._load_more_row = None
         view._listbox = mock.MagicMock()
         view._create_entry_row = mock.MagicMock(return_value=mock.MagicMock())
+        # Initialize search state
+        view._search_query = ""
+        view._filtered_entries = []
 
         view._display_entry_batch(0, 2)
 
@@ -366,6 +375,9 @@ class TestQuarantineViewPagination:
         view._load_more_row = mock.MagicMock()
         view._listbox = mock.MagicMock()
         view._display_entry_batch = mock.MagicMock()
+        # Initialize search state
+        view._search_query = ""
+        view._filtered_entries = []
 
         view._on_show_all_clicked(mock.MagicMock())
 
@@ -386,6 +398,9 @@ class TestQuarantineViewStorageInfo:
         view._manager.get_entry_count.return_value = 5
         view._storage_row = mock.MagicMock()
         view._count_label = mock.MagicMock()
+        # Initialize search state (no active search)
+        view._search_query = ""
+        view._filtered_entries = []
 
         # Create mock entries
         mock_entries = [mock.MagicMock(file_size=1024 * 200) for _ in range(5)]
@@ -404,6 +419,9 @@ class TestQuarantineViewStorageInfo:
         view._manager.get_entry_count.return_value = 1
         view._storage_row = mock.MagicMock()
         view._count_label = mock.MagicMock()
+        # Initialize search state (no active search)
+        view._search_query = ""
+        view._filtered_entries = []
 
         # Create mock entry
         mock_entries = [mock.MagicMock(file_size=512)]
@@ -412,6 +430,505 @@ class TestQuarantineViewStorageInfo:
         view._count_label.set_text.assert_called_with("1 item")
 
 
+class TestQuarantineViewSearch:
+    """Tests for QuarantineView search filtering functionality."""
+
+    def test_filter_entries_empty_query_returns_all(self, quarantine_view_class):
+        """Test that empty search query returns all entries."""
+        view = object.__new__(quarantine_view_class)
+
+        # Create mock entries
+        entry1 = mock.MagicMock()
+        entry1.threat_name = "Eicar-Test-Signature"
+        entry1.original_path = "/home/user/file1.exe"
+
+        entry2 = mock.MagicMock()
+        entry2.threat_name = "Trojan.Generic"
+        entry2.original_path = "/home/user/file2.exe"
+
+        view._all_entries = [entry1, entry2]
+        view._search_query = ""
+
+        result = view._filter_entries()
+
+        assert len(result) == 2
+        assert result == [entry1, entry2]
+
+    def test_filter_entries_case_insensitive_matching(self, quarantine_view_class):
+        """Test that search matching is case-insensitive."""
+        view = object.__new__(quarantine_view_class)
+
+        # Create mock entries
+        entry1 = mock.MagicMock()
+        entry1.threat_name = "Eicar-Test-Signature"
+        entry1.original_path = "/home/user/file1.exe"
+
+        entry2 = mock.MagicMock()
+        entry2.threat_name = "Trojan.Generic"
+        entry2.original_path = "/home/user/file2.exe"
+
+        view._all_entries = [entry1, entry2]
+        view._search_query = "EICAR"
+
+        result = view._filter_entries()
+
+        assert len(result) == 1
+        assert result[0] == entry1
+
+    def test_filter_entries_matches_threat_name(self, quarantine_view_class):
+        """Test that search matches against threat_name field."""
+        view = object.__new__(quarantine_view_class)
+
+        # Create mock entries
+        entry1 = mock.MagicMock()
+        entry1.threat_name = "Eicar-Test-Signature"
+        entry1.original_path = "/home/user/file1.exe"
+
+        entry2 = mock.MagicMock()
+        entry2.threat_name = "Trojan.Generic"
+        entry2.original_path = "/home/user/file2.exe"
+
+        view._all_entries = [entry1, entry2]
+        view._search_query = "trojan"
+
+        result = view._filter_entries()
+
+        assert len(result) == 1
+        assert result[0] == entry2
+
+    def test_filter_entries_matches_original_path(self, quarantine_view_class):
+        """Test that search matches against original_path field."""
+        view = object.__new__(quarantine_view_class)
+
+        # Create mock entries
+        entry1 = mock.MagicMock()
+        entry1.threat_name = "Eicar-Test-Signature"
+        entry1.original_path = "/home/user/downloads/file1.exe"
+
+        entry2 = mock.MagicMock()
+        entry2.threat_name = "Trojan.Generic"
+        entry2.original_path = "/home/user/documents/file2.exe"
+
+        view._all_entries = [entry1, entry2]
+        view._search_query = "downloads"
+
+        result = view._filter_entries()
+
+        assert len(result) == 1
+        assert result[0] == entry1
+
+    def test_filter_entries_partial_match_works(self, quarantine_view_class):
+        """Test that partial substring matching works correctly."""
+        view = object.__new__(quarantine_view_class)
+
+        # Create mock entries
+        entry1 = mock.MagicMock()
+        entry1.threat_name = "Eicar-Test-Signature"
+        entry1.original_path = "/home/user/file1.exe"
+
+        entry2 = mock.MagicMock()
+        entry2.threat_name = "Trojan.Generic"
+        entry2.original_path = "/home/user/file2.exe"
+
+        entry3 = mock.MagicMock()
+        entry3.threat_name = "Trojan.Downloader"
+        entry3.original_path = "/home/user/file3.exe"
+
+        view._all_entries = [entry1, entry2, entry3]
+        view._search_query = "troj"
+
+        result = view._filter_entries()
+
+        assert len(result) == 2
+        assert entry2 in result
+        assert entry3 in result
+
+    def test_filter_entries_no_matches_returns_empty(self, quarantine_view_class):
+        """Test that no matches returns empty list."""
+        view = object.__new__(quarantine_view_class)
+
+        # Create mock entries
+        entry1 = mock.MagicMock()
+        entry1.threat_name = "Eicar-Test-Signature"
+        entry1.original_path = "/home/user/file1.exe"
+
+        entry2 = mock.MagicMock()
+        entry2.threat_name = "Trojan.Generic"
+        entry2.original_path = "/home/user/file2.exe"
+
+        view._all_entries = [entry1, entry2]
+        view._search_query = "nonexistent"
+
+        result = view._filter_entries()
+
+        assert len(result) == 0
+        assert result == []
+
+    def test_filter_entries_handles_none_values(self, quarantine_view_class):
+        """Test that None values in threat_name or original_path are handled gracefully."""
+        view = object.__new__(quarantine_view_class)
+
+        # Create mock entries with None values
+        entry1 = mock.MagicMock()
+        entry1.threat_name = None
+        entry1.original_path = "/home/user/file1.exe"
+
+        entry2 = mock.MagicMock()
+        entry2.threat_name = "Trojan.Generic"
+        entry2.original_path = None
+
+        entry3 = mock.MagicMock()
+        entry3.threat_name = "Eicar-Test-Signature"
+        entry3.original_path = "/home/user/file3.exe"
+
+        view._all_entries = [entry1, entry2, entry3]
+        view._search_query = "eicar"
+
+        result = view._filter_entries()
+
+        # Should only match entry3, None values should not cause errors
+        assert len(result) == 1
+        assert result[0] == entry3
+
+    def test_filter_entries_matches_either_field(self, quarantine_view_class):
+        """Test that search matches if query appears in either threat_name or original_path."""
+        view = object.__new__(quarantine_view_class)
+
+        # Create mock entries
+        entry1 = mock.MagicMock()
+        entry1.threat_name = "Eicar-Test-Signature"
+        entry1.original_path = "/home/user/file1.exe"
+
+        entry2 = mock.MagicMock()
+        entry2.threat_name = "Trojan.Generic"
+        entry2.original_path = "/home/user/test/file2.exe"
+
+        view._all_entries = [entry1, entry2]
+        view._search_query = "test"
+
+        result = view._filter_entries()
+
+        # Should match both: entry1 by threat_name ("Test"), entry2 by path ("/test/")
+        assert len(result) == 2
+        assert entry1 in result
+        assert entry2 in result
+
+
+class TestQuarantineViewSearchIntegration:
+    """Integration tests for search filter functionality."""
+
+    def test_search_state_initialization(self, quarantine_view_class):
+        """Test that search state variables are properly initialized."""
+        view = object.__new__(quarantine_view_class)
+        view._search_query = ""
+        view._filtered_entries = []
+        view._search_timeout_id = None
+
+        assert view._search_query == ""
+        assert view._filtered_entries == []
+        assert view._search_timeout_id is None
+
+    def test_apply_search_filter_clears_listbox(self, quarantine_view_class):
+        """Test that _apply_search_filter clears the listbox before repopulating."""
+        view = object.__new__(quarantine_view_class)
+
+        # Set up mock entries
+        entry1 = mock.MagicMock()
+        entry1.threat_name = "Eicar-Test-Signature"
+        entry1.original_path = "/home/user/file1.exe"
+        entry1.file_size = 512
+
+        view._all_entries = [entry1]
+        view._search_query = "eicar"
+        view._filtered_entries = []
+        view._displayed_count = 5  # Previous state
+        view._load_more_row = mock.MagicMock()
+
+        # Mock UI elements
+        view._listbox = mock.MagicMock()
+        view._listbox.get_first_child.return_value = None  # Simulate empty after clear
+        view._count_label = mock.MagicMock()
+        view._storage_row = mock.MagicMock()
+
+        # Mock methods
+        view._filter_entries = mock.MagicMock(return_value=[entry1])
+        view._update_storage_info = mock.MagicMock()
+        view._display_entry_batch = mock.MagicMock()
+
+        view._apply_search_filter()
+
+        # Verify listbox was cleared
+        assert view._listbox.remove.called or view._listbox.get_first_child.called
+        # Verify pagination state was reset
+        assert view._displayed_count == 0
+        assert view._load_more_row is None
+
+    def test_apply_search_filter_updates_display(self, quarantine_view_class):
+        """Test that _apply_search_filter updates the display with filtered entries."""
+        view = object.__new__(quarantine_view_class)
+
+        # Set up mock entries
+        entry1 = mock.MagicMock()
+        entry1.threat_name = "Eicar-Test-Signature"
+        entry1.original_path = "/home/user/file1.exe"
+        entry1.file_size = 512
+
+        entry2 = mock.MagicMock()
+        entry2.threat_name = "Trojan.Generic"
+        entry2.original_path = "/home/user/file2.exe"
+        entry2.file_size = 1024
+
+        view._all_entries = [entry1, entry2]
+        view._search_query = "eicar"
+        view._filtered_entries = []
+        view._displayed_count = 0
+        view._load_more_row = None
+
+        # Mock UI elements
+        view._listbox = mock.MagicMock()
+        view._listbox.get_first_child.return_value = None
+        view._count_label = mock.MagicMock()
+        view._storage_row = mock.MagicMock()
+
+        # Mock methods
+        view._filter_entries = mock.MagicMock(return_value=[entry1])
+        view._update_storage_info = mock.MagicMock()
+        view._display_entry_batch = mock.MagicMock()
+        view._create_no_results_state = mock.MagicMock()
+        view._create_empty_state = mock.MagicMock()
+
+        view._apply_search_filter()
+
+        # Verify filtered entries were updated
+        view._filter_entries.assert_called_once()
+        # Verify storage info was updated with all entries (not filtered)
+        view._update_storage_info.assert_called_once_with(view._all_entries)
+        # Verify display was updated with filtered results
+        view._display_entry_batch.assert_called()
+
+    def test_apply_search_filter_shows_no_results_placeholder(self, quarantine_view_class):
+        """Test that _apply_search_filter shows no-results placeholder when filter returns empty."""
+        view = object.__new__(quarantine_view_class)
+
+        # Set up mock entries (have entries, but search returns none)
+        entry1 = mock.MagicMock()
+        entry1.threat_name = "Eicar-Test-Signature"
+        entry1.original_path = "/home/user/file1.exe"
+        entry1.file_size = 512
+
+        view._all_entries = [entry1]
+        view._search_query = "nonexistent"
+        view._filtered_entries = []
+        view._displayed_count = 0
+        view._load_more_row = None
+
+        # Mock UI elements
+        view._listbox = mock.MagicMock()
+        view._listbox.get_first_child.return_value = None
+        view._count_label = mock.MagicMock()
+        view._storage_row = mock.MagicMock()
+
+        # Mock methods
+        view._filter_entries = mock.MagicMock(return_value=[])
+        view._update_storage_info = mock.MagicMock()
+        no_results_widget = mock.MagicMock()
+        view._create_no_results_state = mock.MagicMock(return_value=no_results_widget)
+
+        view._apply_search_filter()
+
+        # Verify no-results placeholder was created and set
+        view._create_no_results_state.assert_called_once()
+        view._listbox.set_placeholder.assert_called_with(no_results_widget)
+
+    def test_entries_to_display_returns_filtered_when_search_active(
+        self, quarantine_view_class
+    ):
+        """Test that _entries_to_display returns filtered entries when search is active."""
+        view = object.__new__(quarantine_view_class)
+
+        # Set up mock entries
+        entry1 = mock.MagicMock()
+        entry1.threat_name = "Eicar-Test-Signature"
+        entry1.original_path = "/home/user/file1.exe"
+
+        entry2 = mock.MagicMock()
+        entry2.threat_name = "Trojan.Generic"
+        entry2.original_path = "/home/user/file2.exe"
+
+        view._all_entries = [entry1, entry2]
+        view._filtered_entries = [entry1]
+        view._search_query = "eicar"
+
+        result = view._entries_to_display
+
+        # Should return filtered entries when search is active
+        assert result == [entry1]
+        assert len(result) == 1
+
+    def test_entries_to_display_returns_all_when_search_inactive(
+        self, quarantine_view_class
+    ):
+        """Test that _entries_to_display returns all entries when search is inactive."""
+        view = object.__new__(quarantine_view_class)
+
+        # Set up mock entries
+        entry1 = mock.MagicMock()
+        entry1.threat_name = "Eicar-Test-Signature"
+        entry1.original_path = "/home/user/file1.exe"
+
+        entry2 = mock.MagicMock()
+        entry2.threat_name = "Trojan.Generic"
+        entry2.original_path = "/home/user/file2.exe"
+
+        view._all_entries = [entry1, entry2]
+        view._filtered_entries = [entry1]
+        view._search_query = ""
+
+        result = view._entries_to_display
+
+        # Should return all entries when search is empty
+        assert result == [entry1, entry2]
+        assert len(result) == 2
+
+    def test_display_entry_batch_uses_filtered_entries(self, quarantine_view_class):
+        """Test that pagination works correctly with filtered entries."""
+        view = object.__new__(quarantine_view_class)
+
+        # Set up mock entries
+        entry1 = mock.MagicMock()
+        entry1.threat_name = "Eicar-Test-Signature"
+        entry1.original_path = "/home/user/file1.exe"
+
+        entry2 = mock.MagicMock()
+        entry2.threat_name = "Trojan.Generic"
+        entry2.original_path = "/home/user/file2.exe"
+
+        entry3 = mock.MagicMock()
+        entry3.threat_name = "Trojan.Downloader"
+        entry3.original_path = "/home/user/file3.exe"
+
+        view._all_entries = [entry1, entry2, entry3]
+        view._filtered_entries = [entry2, entry3]
+        view._search_query = "trojan"
+        view._displayed_count = 0
+        view._load_more_row = None
+
+        # Mock UI elements
+        view._listbox = mock.MagicMock()
+        view._create_entry_row = mock.MagicMock(return_value=mock.MagicMock())
+
+        # Display first batch - should use filtered entries
+        view._display_entry_batch(0, 2)
+
+        # Should have displayed 2 entries from filtered list
+        assert view._displayed_count == 2
+        # create_entry_row should be called with filtered entries
+        assert view._create_entry_row.call_count == 2
+        view._create_entry_row.assert_any_call(entry2)
+        view._create_entry_row.assert_any_call(entry3)
+
+    def test_update_storage_info_shows_filtered_count(
+        self, quarantine_view_class, mock_gi_modules
+    ):
+        """Test that storage info shows filtered count when search is active."""
+        with mock.patch.dict(
+            sys.modules,
+            {
+                "src.core.quarantine": mock.MagicMock(),
+            },
+        ):
+            from src.ui.quarantine_view import format_file_size
+
+            view = object.__new__(quarantine_view_class)
+            view._manager = mock.MagicMock()
+
+            # Set up mock entries
+            entry1 = mock.MagicMock()
+            entry1.file_size = 512
+
+            entry2 = mock.MagicMock()
+            entry2.file_size = 1024
+
+            entry3 = mock.MagicMock()
+            entry3.file_size = 2048
+
+            all_entries = [entry1, entry2, entry3]
+            view._all_entries = all_entries
+            view._filtered_entries = [entry1, entry2]
+            view._search_query = "test"
+
+            # Mock UI elements
+            view._count_label = mock.MagicMock()
+            view._storage_row = mock.MagicMock()
+
+            view._update_storage_info(all_entries)
+
+            # Should show "2 of 3 items" format
+            view._count_label.set_text.assert_called_with("2 of 3 items")
+            # Size should still reflect all entries
+            total_size = 512 + 1024 + 2048
+            expected_size = format_file_size(total_size)
+            view._storage_row.set_subtitle.assert_called_with(expected_size)
+
+    def test_update_storage_info_shows_normal_count_when_no_search(
+        self, quarantine_view_class
+    ):
+        """Test that storage info shows normal count when search is inactive."""
+        view = object.__new__(quarantine_view_class)
+        view._manager = mock.MagicMock()
+
+        # Set up mock entries
+        entry1 = mock.MagicMock()
+        entry1.file_size = 512
+
+        entry2 = mock.MagicMock()
+        entry2.file_size = 1024
+
+        all_entries = [entry1, entry2]
+        view._all_entries = all_entries
+        view._filtered_entries = []
+        view._search_query = ""
+
+        # Mock UI elements
+        view._count_label = mock.MagicMock()
+        view._storage_row = mock.MagicMock()
+
+        view._update_storage_info(all_entries)
+
+        # Should show "2 items" format (normal)
+        view._count_label.set_text.assert_called_with("2 items")
+
+    def test_update_storage_info_handles_singular_filtered_count(
+        self, quarantine_view_class
+    ):
+        """Test that storage info handles singular item correctly when filtered."""
+        view = object.__new__(quarantine_view_class)
+        view._manager = mock.MagicMock()
+
+        # Set up mock entries
+        entry1 = mock.MagicMock()
+        entry1.file_size = 512
+
+        entry2 = mock.MagicMock()
+        entry2.file_size = 1024
+
+        all_entries = [entry1, entry2]
+        view._all_entries = all_entries
+        view._filtered_entries = [entry1]
+        view._search_query = "test"
+
+        # Mock UI elements
+        view._count_label = mock.MagicMock()
+        view._storage_row = mock.MagicMock()
+
+        view._update_storage_info(all_entries)
+
+        # Should show "1 of 2 items" format
+        view._count_label.set_text.assert_called_with("1 of 2 items")
+
+
+class TestQuarantineViewStorageInfoExtended:
+    """Extended tests for storage info with additional edge cases."""
 
     def test_create_entry_row_truncates_long_path(
         self, quarantine_view_class, mock_quarantine_entry
@@ -477,6 +994,9 @@ def test_quarantine_view_basic(mock_gi_modules):
         view._manager.get_total_size.return_value = 2048
         view._storage_row = mock.MagicMock()
         view._count_label = mock.MagicMock()
+        # Initialize search state
+        view._search_query = ""
+        view._filtered_entries = []
 
         # Test _update_storage_info
         mock_entries = [mock.MagicMock(file_size=512) for _ in range(5)]

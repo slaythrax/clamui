@@ -87,6 +87,11 @@ class QuarantineView(Gtk.Box):
         self._load_more_row: Gtk.ListBoxRow | None = None
         self._scrolled: Gtk.ScrolledWindow | None = None
 
+        # Search/filter state
+        self._search_query: str = ""
+        self._filtered_entries: list[QuarantineEntry] = []
+        self._search_timeout_id: int | None = None
+
         # Callback for quarantine content changes (for external notification)
         self._on_quarantine_changed = None
 
@@ -154,15 +159,26 @@ class QuarantineView(Gtk.Box):
         list_group.set_description("Detected threats isolated from your system")
         self._list_group = list_group
 
-        # Header box with action buttons
+        # Header box with search and action buttons
         header_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
-        header_box.set_halign(Gtk.Align.END)
-        header_box.set_spacing(6)
+        header_box.set_spacing(12)
+
+        # Search entry
+        self._search_entry = Gtk.SearchEntry()
+        self._search_entry.set_placeholder_text("Search by threat name or path...")
+        self._search_entry.set_hexpand(True)
+        self._search_entry.connect("search-changed", self._on_search_changed)
+        header_box.append(self._search_entry)
+
+        # Action buttons box (right-aligned)
+        action_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
+        action_box.set_halign(Gtk.Align.END)
+        action_box.set_spacing(6)
 
         # Loading spinner (hidden by default)
         self._spinner = Gtk.Spinner()
         self._spinner.set_visible(False)
-        header_box.append(self._spinner)
+        action_box.append(self._spinner)
 
         # Refresh button
         refresh_button = Gtk.Button()
@@ -171,7 +187,7 @@ class QuarantineView(Gtk.Box):
         refresh_button.add_css_class("flat")
         refresh_button.connect("clicked", self._on_refresh_clicked)
         self._refresh_button = refresh_button
-        header_box.append(refresh_button)
+        action_box.append(refresh_button)
 
         # Clear old items button
         clear_old_button = Gtk.Button()
@@ -180,7 +196,9 @@ class QuarantineView(Gtk.Box):
         clear_old_button.add_css_class("flat")
         clear_old_button.connect("clicked", self._on_clear_old_clicked)
         self._clear_old_button = clear_old_button
-        header_box.append(clear_old_button)
+        action_box.append(clear_old_button)
+
+        header_box.append(action_box)
 
         list_group.set_header_suffix(header_box)
 
@@ -231,6 +249,37 @@ class QuarantineView(Gtk.Box):
         empty_box.append(subtitle)
 
         return empty_box
+
+    def _create_no_results_state(self) -> Gtk.Widget:
+        """Create the no search results placeholder widget."""
+        no_results_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        no_results_box.set_valign(Gtk.Align.CENTER)
+        no_results_box.set_margin_top(48)
+        no_results_box.set_margin_bottom(48)
+        no_results_box.set_spacing(12)
+
+        # No results icon
+        icon = Gtk.Image()
+        icon.set_from_icon_name("edit-find-symbolic")
+        icon.set_pixel_size(64)
+        icon.add_css_class("dim-label")
+        no_results_box.append(icon)
+
+        # No results title
+        title = Gtk.Label()
+        title.set_text("No matching entries")
+        title.add_css_class("title-2")
+        title.add_css_class("dim-label")
+        no_results_box.append(title)
+
+        # No results subtitle
+        subtitle = Gtk.Label()
+        subtitle.set_text("Try a different search term")
+        subtitle.add_css_class("dim-label")
+        subtitle.add_css_class("caption")
+        no_results_box.append(subtitle)
+
+        return no_results_box
 
     def _create_loading_state(self) -> Gtk.ListBoxRow:
         """
@@ -325,12 +374,25 @@ class QuarantineView(Gtk.Box):
                 self._clear_old_button.set_sensitive(False)
                 return False
 
+            # If search is active, apply filter to maintain filtered view across refresh
+            if self._search_query:
+                # Update filtered entries based on current search query
+                self._filtered_entries = self._filter_entries()
+
+                # If filtered results are empty, show placeholder and return
+                if not self._filtered_entries:
+                    self._clear_old_button.set_sensitive(True)
+                    return False
+
+            # Get the appropriate entry list for display
+            entries_to_display = self._entries_to_display
+
             # Display initial batch with pagination
-            initial_limit = min(INITIAL_DISPLAY_LIMIT, len(entries))
+            initial_limit = min(INITIAL_DISPLAY_LIMIT, len(entries_to_display))
             self._display_entry_batch(0, initial_limit)
 
             # Add "Load More" button if there are more entries
-            if len(entries) > INITIAL_DISPLAY_LIMIT:
+            if len(entries_to_display) > INITIAL_DISPLAY_LIMIT:
                 self._add_load_more_button()
 
             # Enable clear old button if there are entries
@@ -346,18 +408,37 @@ class QuarantineView(Gtk.Box):
 
         return False
 
+    @property
+    def _entries_to_display(self) -> list[QuarantineEntry]:
+        """
+        Get the appropriate entry list for display.
+
+        Returns _filtered_entries when search is active (non-empty search query),
+        otherwise returns _all_entries.
+
+        Returns:
+            List of QuarantineEntry objects to display
+        """
+        if self._search_query:
+            return self._filtered_entries
+        return self._all_entries
+
     def _display_entry_batch(self, start_index: int, count: int):
         """
         Display a batch of entry rows starting from the given index.
 
+        Uses _entries_to_display property to determine which list to use
+        based on whether search is active.
+
         Args:
-            start_index: Index in _all_entries to start from
+            start_index: Index in entry list to start from
             count: Number of entries to display
         """
-        end_index = min(start_index + count, len(self._all_entries))
+        entries = self._entries_to_display
+        end_index = min(start_index + count, len(entries))
 
         for i in range(start_index, end_index):
-            entry = self._all_entries[i]
+            entry = entries[i]
             try:
                 row = self._create_entry_row(entry)
                 # Insert before the "Load More" button if it exists
@@ -378,12 +459,18 @@ class QuarantineView(Gtk.Box):
         load_more_box.set_margin_top(12)
         load_more_box.set_margin_bottom(12)
 
+        # Get the appropriate entry list
+        entries = self._entries_to_display
+
         # Progress label
-        remaining = len(self._all_entries) - self._displayed_count
+        remaining = len(entries) - self._displayed_count
         progress_label = Gtk.Label()
+
+        # Show "filtered entries" when search is active
+        entries_label = "filtered entries" if self._search_query else "entries"
         progress_label.set_markup(
             f"<span size='small'>Showing {self._displayed_count} of "
-            f"{len(self._all_entries)} entries</span>"
+            f"{len(entries)} {entries_label}</span>"
         )
         progress_label.add_css_class("dim-label")
         load_more_box.append(progress_label)
@@ -429,11 +516,12 @@ class QuarantineView(Gtk.Box):
             self._listbox.remove(self._load_more_row)
             self._load_more_row = None
 
-        remaining = len(self._all_entries) - self._displayed_count
+        entries = self._entries_to_display
+        remaining = len(entries) - self._displayed_count
         batch_size = min(LOAD_MORE_BATCH_SIZE, remaining)
         self._display_entry_batch(self._displayed_count, batch_size)
 
-        if self._displayed_count < len(self._all_entries):
+        if self._displayed_count < len(entries):
             self._add_load_more_button()
 
         # Restore scroll position after layout
@@ -452,7 +540,8 @@ class QuarantineView(Gtk.Box):
             self._listbox.remove(self._load_more_row)
             self._load_more_row = None
 
-        remaining = len(self._all_entries) - self._displayed_count
+        entries = self._entries_to_display
+        remaining = len(entries) - self._displayed_count
         self._display_entry_batch(self._displayed_count, remaining)
 
         # Restore scroll position after layout
@@ -471,6 +560,122 @@ class QuarantineView(Gtk.Box):
     def _on_clear_old_clicked(self, button):
         """Handle clear old items button click."""
         self._manager.cleanup_old_entries_async(callback=self._on_cleanup_completed)
+
+    def _on_search_changed(self, search_entry):
+        """
+        Handle search entry text change with debouncing.
+
+        Cancels any pending search and schedules a new one after 250ms delay
+        to avoid filtering on every keystroke.
+
+        Args:
+            search_entry: The Gtk.SearchEntry widget
+        """
+        # Cancel any pending search timeout
+        if self._search_timeout_id is not None:
+            GLib.source_remove(self._search_timeout_id)
+            self._search_timeout_id = None
+
+        # Get the current search query
+        self._search_query = search_entry.get_text().strip()
+
+        # Schedule filter update after 250ms delay
+        self._search_timeout_id = GLib.timeout_add(250, self._execute_search_filter)
+
+    def _execute_search_filter(self) -> bool:
+        """
+        Execute the search filter operation.
+
+        This is the callback invoked after the debounce delay. Applies the
+        current search filter to the quarantine list.
+
+        Returns:
+            False to prevent GLib.timeout_add from repeating
+        """
+        # Clear timeout ID since the timeout has been consumed
+        self._search_timeout_id = None
+
+        # Apply the search filter
+        self._apply_search_filter()
+
+        return False
+
+    def _filter_entries(self) -> list[QuarantineEntry]:
+        """
+        Filter quarantine entries based on current search query.
+
+        Performs case-insensitive substring matching against both the threat name
+        and original file path. An empty query returns all entries.
+
+        Returns:
+            List of QuarantineEntry objects matching the search query
+        """
+        # Empty query returns all entries
+        if not self._search_query:
+            return self._all_entries
+
+        # Normalize search query for case-insensitive comparison
+        query_lower = self._search_query.lower()
+
+        # Filter entries matching threat_name or original_path
+        filtered = [
+            entry
+            for entry in self._all_entries
+            if query_lower in (entry.threat_name or "").lower()
+            or query_lower in (entry.original_path or "").lower()
+        ]
+
+        return filtered
+
+    def _apply_search_filter(self):
+        """
+        Apply current search filter to the quarantine list.
+
+        Filters entries based on _search_query, clears the listbox,
+        resets pagination state, and displays filtered results.
+        This is the main entry point for triggering a filter update.
+        """
+        # Update filtered entries based on current search query
+        self._filtered_entries = self._filter_entries()
+
+        # Update storage info to reflect filtered count
+        self._update_storage_info(self._all_entries)
+
+        # Clear existing rows (compatible with all GTK4 versions)
+        while True:
+            child = self._listbox.get_first_child()
+            if child is None:
+                break
+            self._listbox.remove(child)
+
+        # Reset pagination state
+        self._displayed_count = 0
+        self._load_more_row = None
+
+        # Handle empty filtered results - show appropriate placeholder
+        if not self._filtered_entries:
+            # If search is active but has no matches (all_entries exists but filtered is empty),
+            # show the no-results placeholder
+            if self._search_query and self._all_entries:
+                self._listbox.set_placeholder(self._create_no_results_state())
+            else:
+                # Otherwise show empty state placeholder (for when quarantine is actually empty)
+                self._listbox.set_placeholder(self._create_empty_state())
+            return
+
+        # Results exist - ensure empty state placeholder is set (for when all entries are removed later)
+        self._listbox.set_placeholder(self._create_empty_state())
+
+        # Get the appropriate entry list for display
+        entries_to_display = self._entries_to_display
+
+        # Display initial batch with pagination
+        initial_limit = min(INITIAL_DISPLAY_LIMIT, len(entries_to_display))
+        self._display_entry_batch(0, initial_limit)
+
+        # Add "Load More" button if there are more entries
+        if len(entries_to_display) > INITIAL_DISPLAY_LIMIT:
+            self._add_load_more_button()
 
     def _on_cleanup_completed(self, removed_count: int) -> bool:
         """
@@ -529,17 +734,31 @@ class QuarantineView(Gtk.Box):
         """
         Update the storage info display with total size and item count.
 
+        When search is active, shows filtered count vs total count (e.g., '5 of 20 items').
+        Total size always reflects the full quarantine storage.
+
         Args:
             entries: List of quarantine entries to calculate size from
         """
         total_size = sum(entry.file_size for entry in entries if entry.file_size)
-        item_count = len(entries)
+        total_count = len(entries)
 
-        # Update count label
-        item_text = f"{item_count} item" if item_count == 1 else f"{item_count} items"
+        # Update count label - show filtered vs total when search is active
+        if self._search_query and self._filtered_entries is not None:
+            filtered_count = len(self._filtered_entries)
+            if filtered_count == 1 and total_count == 1:
+                item_text = "1 of 1 item"
+            elif filtered_count == 1:
+                item_text = f"1 of {total_count} items"
+            else:
+                item_text = f"{filtered_count} of {total_count} items"
+        else:
+            # No search active - show normal count
+            item_text = f"{total_count} item" if total_count == 1 else f"{total_count} items"
+
         self._count_label.set_text(item_text)
 
-        # Update size display
+        # Update size display - always shows total quarantine size
         size_str = format_file_size(total_size)
         self._storage_row.set_subtitle(size_str)
 
