@@ -12,6 +12,7 @@ gi.require_version("Adw", "1")
 from gi.repository import Adw, Gio, GLib, Gtk
 
 from ..core.log_manager import DaemonStatus, LogEntry, LogManager
+from ..core.statistics_calculator import StatisticsCalculator
 from ..core.utils import copy_to_clipboard
 from .fullscreen_dialog import FullscreenLogDialog
 from .utils import add_row_icon
@@ -45,6 +46,9 @@ class LogsView(Gtk.Box):
 
         # Initialize log manager
         self._log_manager = LogManager()
+
+        # Initialize statistics calculator
+        self._statistics_calculator = StatisticsCalculator(log_manager=self._log_manager)
 
         # Currently selected log entry
         self._selected_log: LogEntry | None = None
@@ -761,6 +765,42 @@ class LogsView(Gtk.Box):
             lines.append(f"Duration: {entry.duration:.2f} seconds")
 
         lines.append("")
+
+        # Statistics Summary (for scan logs only)
+        if entry.type == "scan":
+            stats = self._statistics_calculator.extract_entry_statistics(entry)
+
+            # Only show statistics section if we have meaningful data
+            if (
+                stats["files_scanned"] > 0
+                or stats["directories_scanned"] > 0
+                or stats["duration"] > 0
+            ):
+                lines.append("Statistics Summary:")
+                lines.append("-" * 50)
+
+                if stats["files_scanned"] > 0:
+                    lines.append(f"  Files Scanned: {stats['files_scanned']:,}")
+
+                if stats["directories_scanned"] > 0:
+                    lines.append(f"  Directories Scanned: {stats['directories_scanned']:,}")
+
+                if stats["duration"] > 0:
+                    # Format duration nicely
+                    duration = stats["duration"]
+                    if duration < 60:
+                        duration_str = f"{duration:.2f} seconds"
+                    elif duration < 3600:
+                        minutes = int(duration // 60)
+                        seconds = duration % 60
+                        duration_str = f"{minutes}m {seconds:.0f}s"
+                    else:
+                        hours = int(duration // 3600)
+                        minutes = int((duration % 3600) // 60)
+                        duration_str = f"{hours}h {minutes}m"
+                    lines.append(f"  Duration: {duration_str}")
+
+                lines.append("")
 
         # Summary
         lines.append("Summary:")

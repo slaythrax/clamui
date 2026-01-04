@@ -30,6 +30,16 @@ THREATS_FOUND_PATTERNS = [
     re.compile(r"detected\s*(\d+)", re.IGNORECASE),
 ]
 
+# Pre-compiled regex patterns for extracting directory counts
+# These patterns are used to parse scan log entries for directory count information
+DIRS_SCANNED_PATTERNS = [
+    re.compile(r"director(?:y|ies)\s+scanned[:\s]+(\d+)", re.IGNORECASE),
+    re.compile(r"(\d+)\s*director(?:y|ies)\s*scanned", re.IGNORECASE),
+    re.compile(r"scanned\s*(\d+)\s*director(?:y|ies)", re.IGNORECASE),
+    re.compile(r"director(?:y|ies)[:\s]+(\d+)", re.IGNORECASE),
+    re.compile(r"(\d+)\s*director(?:y|ies)", re.IGNORECASE),
+]
+
 
 class Timeframe(Enum):
     """Timeframe options for statistics aggregation."""
@@ -291,6 +301,31 @@ class StatisticsCalculator:
 
         return 0
 
+    def _extract_directories_scanned(self, entry: LogEntry) -> int:
+        """
+        Extract the number of directories scanned from a log entry.
+
+        Parses the summary or details to find directory count information.
+
+        Args:
+            entry: LogEntry to extract directory count from
+
+        Returns:
+            Number of directories scanned, or 0 if not found
+        """
+        text = f"{entry.summary} {entry.details}"
+
+        # Use pre-compiled patterns for faster matching
+        for pattern in DIRS_SCANNED_PATTERNS:
+            match = pattern.search(text)
+            if match:
+                try:
+                    return int(match.group(1))
+                except (ValueError, IndexError):
+                    continue
+
+        return 0
+
     def _extract_threats_found(self, entry: LogEntry) -> int:
         """
         Extract the number of threats found from a log entry.
@@ -318,6 +353,34 @@ class StatisticsCalculator:
             return 1
 
         return 0
+
+    def extract_entry_statistics(self, entry: LogEntry) -> dict:
+        """
+        Extract statistics from a single log entry.
+
+        Provides a clean interface for extracting scan statistics from an individual
+        log entry. Useful for displaying statistics in log detail views without
+        needing to aggregate across multiple entries.
+
+        Args:
+            entry: LogEntry to extract statistics from
+
+        Returns:
+            Dictionary with the following keys:
+                - files_scanned: Number of files scanned (int)
+                - directories_scanned: Number of directories scanned (int)
+                - duration: Scan duration in seconds (float)
+
+        Example:
+            >>> entry = LogEntry(...)
+            >>> stats = calculator.extract_entry_statistics(entry)
+            >>> print(f"Scanned {stats['files_scanned']} files in {stats['duration']}s")
+        """
+        return {
+            "files_scanned": self._extract_files_scanned(entry),
+            "directories_scanned": self._extract_directories_scanned(entry),
+            "duration": entry.duration,
+        }
 
     def get_statistics(self, timeframe: str = "all") -> ScanStatistics:
         """
@@ -400,9 +463,7 @@ class StatisticsCalculator:
         stats = self.get_statistics(timeframe)
         return stats.average_duration
 
-    def get_scan_trend_data(
-        self, timeframe: str = "weekly", data_points: int = 7
-    ) -> list[dict]:
+    def get_scan_trend_data(self, timeframe: str = "weekly", data_points: int = 7) -> list[dict]:
         """
         Get scan trend data for charting/graphing.
 
@@ -431,9 +492,9 @@ class StatisticsCalculator:
             if entry_time:
                 date_key = entry_time.strftime("%Y-%m-%d")
                 scans_by_date[date_key] = scans_by_date.get(date_key, 0) + 1
-                threats_by_date[date_key] = (
-                    threats_by_date.get(date_key, 0) + self._extract_threats_found(entry)
-                )
+                threats_by_date[date_key] = threats_by_date.get(
+                    date_key, 0
+                ) + self._extract_threats_found(entry)
 
         # Generate date range based on timeframe
         start_date, end_date = self._get_timeframe_range(timeframe)
@@ -479,11 +540,13 @@ class StatisticsCalculator:
                 interval_threats += threats_by_date.get(date_key, 0)
                 check_date += timedelta(days=1)
 
-            result.append({
-                "date": current_date.strftime("%Y-%m-%d"),
-                "scans": interval_scans,
-                "threats": interval_threats,
-            })
+            result.append(
+                {
+                    "date": current_date.strftime("%Y-%m-%d"),
+                    "scans": interval_scans,
+                    "threats": interval_threats,
+                }
+            )
 
             current_date = interval_end
 
@@ -543,11 +606,17 @@ class StatisticsCalculator:
             level = ProtectionLevel.AT_RISK
             message = "Last scan was over a week ago"
             is_protected = False
-        elif definition_age_hours is not None and definition_age_hours > self.DEFINITION_CRITICAL_THRESHOLD_HOURS:
+        elif (
+            definition_age_hours is not None
+            and definition_age_hours > self.DEFINITION_CRITICAL_THRESHOLD_HOURS
+        ):
             level = ProtectionLevel.AT_RISK
             message = "Virus definitions are over 7 days old"
             is_protected = False
-        elif definition_age_hours is not None and definition_age_hours > self.DEFINITION_WARNING_THRESHOLD_HOURS:
+        elif (
+            definition_age_hours is not None
+            and definition_age_hours > self.DEFINITION_WARNING_THRESHOLD_HOURS
+        ):
             level = ProtectionLevel.AT_RISK
             message = "Virus definitions are over 1 day old"
             is_protected = False
