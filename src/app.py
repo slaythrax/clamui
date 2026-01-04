@@ -230,26 +230,32 @@ class ClamUIApp(Adw.Application):
         show_scan_action = Gio.SimpleAction.new("show-scan", None)
         show_scan_action.connect("activate", self._on_show_scan)
         self.add_action(show_scan_action)
+        self.set_accels_for_action("app.show-scan", ["<Control>1"])
 
         show_update_action = Gio.SimpleAction.new("show-update", None)
         show_update_action.connect("activate", self._on_show_update)
         self.add_action(show_update_action)
+        self.set_accels_for_action("app.show-update", ["<Control>2"])
 
         show_logs_action = Gio.SimpleAction.new("show-logs", None)
         show_logs_action.connect("activate", self._on_show_logs)
         self.add_action(show_logs_action)
+        self.set_accels_for_action("app.show-logs", ["<Control>3"])
 
         show_components_action = Gio.SimpleAction.new("show-components", None)
         show_components_action.connect("activate", self._on_show_components)
         self.add_action(show_components_action)
-
-        show_statistics_action = Gio.SimpleAction.new("show-statistics", None)
-        show_statistics_action.connect("activate", self._on_show_statistics)
-        self.add_action(show_statistics_action)
+        self.set_accels_for_action("app.show-components", ["<Control>4"])
 
         show_quarantine_action = Gio.SimpleAction.new("show-quarantine", None)
         show_quarantine_action.connect("activate", self._on_show_quarantine)
         self.add_action(show_quarantine_action)
+        self.set_accels_for_action("app.show-quarantine", ["<Control>5"])
+
+        show_statistics_action = Gio.SimpleAction.new("show-statistics", None)
+        show_statistics_action.connect("activate", self._on_show_statistics)
+        self.add_action(show_statistics_action)
+        self.set_accels_for_action("app.show-statistics", ["<Control>6"])
 
     def _setup_tray_indicator(self):
         """Initialize the system tray indicator subprocess."""
