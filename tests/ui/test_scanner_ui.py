@@ -55,11 +55,11 @@ def scan_view_class(mock_gi_modules):
     mock_quarantine_module.QuarantineManager = mock.MagicMock()
     mock_quarantine_module.QuarantineStatus = mock.MagicMock()
 
-    mock_fullscreen_dialog = mock.MagicMock()
-    mock_fullscreen_dialog.FullscreenLogDialog = mock.MagicMock()
-
     mock_profile_dialogs = mock.MagicMock()
     mock_profile_dialogs.ProfileListDialog = mock.MagicMock()
+
+    mock_scan_results_dialog = mock.MagicMock()
+    mock_scan_results_dialog.ScanResultsDialog = mock.MagicMock()
 
     with mock.patch.dict(
         sys.modules,
@@ -67,8 +67,8 @@ def scan_view_class(mock_gi_modules):
             "src.core.scanner": mock_scanner_module,
             "src.core.utils": mock_utils_module,
             "src.core.quarantine": mock_quarantine_module,
-            "src.ui.fullscreen_dialog": mock_fullscreen_dialog,
             "src.ui.profile_dialogs": mock_profile_dialogs,
+            "src.ui.scan_results_dialog": mock_scan_results_dialog,
         },
     ):
         # Need to remove and reimport the scan_view module for fresh mocks
@@ -102,9 +102,7 @@ def mock_scan_view(scan_view_class, mock_gi_modules):
     view._selected_path = ""
     view._is_scanning = False
     view._eicar_temp_path = ""
-    view._displayed_threat_count =0
-    view._all_threat_details = []
-    view._load_more_row = None
+    view._current_result = None
     view._on_scan_state_changed = None
     view._selected_profile = None
     view._profile_list = []
@@ -137,11 +135,16 @@ def mock_scan_view(scan_view_class, mock_gi_modules):
     view._export_text_button = mock.MagicMock()
     view._export_csv_button = mock.MagicMock()
     view._raw_output = ""
-    view._current_result = None
 
-    # Backend status UI elements
-    view._backend_status_icon = mock.MagicMock()
-    view._backend_status_label = mock.MagicMock()
+    # Progress section UI elements
+    view._progress_section = mock.MagicMock()
+    view._progress_bar = mock.MagicMock()
+    view._progress_label = mock.MagicMock()
+    view._pulse_timeout_id = None
+
+    # View results section UI elements
+    view._view_results_section = mock.MagicMock()
+    view._view_results_button = mock.MagicMock()
 
     # Mock internal methods commonly used
     view._setup_ui = mock.MagicMock()
@@ -150,16 +153,17 @@ def mock_scan_view(scan_view_class, mock_gi_modules):
     view._create_profile_section = mock.MagicMock()
     view._create_selection_section = mock.MagicMock()
     view._create_scan_section = mock.MagicMock()
-    view._create_results_section = mock.MagicMock()
+    view._create_view_results_section = mock.MagicMock()
     view._create_status_bar = mock.MagicMock()
     view._check_clamav_status = mock.MagicMock()
-    view._update_backend_status = mock.MagicMock()
     view._update_scan_button_state = mock.MagicMock()
-    view._display_scan_results = mock.MagicMock()
     view._set_selected_path = mock.MagicMock()
     view._start_scan = mock.MagicMock()
     view._run_scan = mock.MagicMock()
     view._update_status = mock.MagicMock()
+    view._show_view_results = mock.MagicMock()
+    view._hide_view_results = mock.MagicMock()
+    view._on_view_results_clicked = mock.MagicMock()
 
     # Mock parent class methods
     view.append = mock.MagicMock()
@@ -242,13 +246,9 @@ class TestScanViewInitialization:
         """Test that initial EICAR temp path is empty."""
         assert mock_scan_view._eicar_temp_path == ""
 
-    def test_initial_displayed_threat_count_is_zero(self, mock_scan_view):
-        """Test that initial displayed threat count is zero."""
-        assert mock_scan_view._displayed_threat_count == 0
-
-    def test_initial_threat_details_is_empty_list(self, mock_scan_view):
-        """Test that initial threat details is empty list."""
-        assert mock_scan_view._all_threat_details == []
+    def test_initial_current_result_is_none(self, mock_scan_view):
+        """Test that current result is initially None."""
+        assert mock_scan_view._current_result is None
 
     def test_initial_scan_state_callback_is_none(self, mock_scan_view):
         """Test that scan state callback is initially None."""
@@ -432,17 +432,50 @@ class TestProfileUI:
 
 
 @pytest.mark.ui
-class TestBackendStatus:
-    """Tests for backend status UI."""
+class TestProgressSection:
+    """Tests for progress bar and status display during scanning."""
 
-    def test_backend_status_icon_exists(self, mock_scan_view):
-        """Test that backend status icon exists."""
-        assert hasattr(mock_scan_view, "_backend_status_icon")
+    def test_progress_section_exists(self, mock_scan_view):
+        """Test that progress section exists."""
+        assert hasattr(mock_scan_view, "_progress_section")
 
-    def test_backend_status_label_exists(self, mock_scan_view):
-        """Test that backend status label exists."""
-        assert hasattr(mock_scan_view, "_backend_status_label")
+    def test_progress_bar_exists(self, mock_scan_view):
+        """Test that progress bar exists."""
+        assert hasattr(mock_scan_view, "_progress_bar")
 
-    def test_update_backend_status_method_exists(self, mock_scan_view):
-        """Test that update backend status method exists."""
-        assert hasattr(mock_scan_view, "_update_backend_status")
+    def test_progress_label_exists(self, mock_scan_view):
+        """Test that progress label exists."""
+        assert hasattr(mock_scan_view, "_progress_label")
+
+    def test_pulse_timeout_id_initially_none(self, mock_scan_view):
+        """Test that pulse timeout ID is initially None."""
+        assert mock_scan_view._pulse_timeout_id is None
+
+
+@pytest.mark.ui
+class TestViewResultsSection:
+    """Tests for the view results button functionality."""
+
+    def test_view_results_section_exists(self, mock_scan_view):
+        """Test that view results section exists."""
+        assert hasattr(mock_scan_view, "_view_results_section")
+
+    def test_view_results_button_exists(self, mock_scan_view):
+        """Test that view results button exists."""
+        assert hasattr(mock_scan_view, "_view_results_button")
+
+    def test_show_view_results_method_exists(self, scan_view_class):
+        """Test that _show_view_results method exists."""
+        assert hasattr(scan_view_class, "_show_view_results")
+
+    def test_hide_view_results_method_exists(self, scan_view_class):
+        """Test that _hide_view_results method exists."""
+        assert hasattr(scan_view_class, "_hide_view_results")
+
+    def test_on_view_results_clicked_method_exists(self, scan_view_class):
+        """Test that _on_view_results_clicked method exists."""
+        assert hasattr(scan_view_class, "_on_view_results_clicked")
+
+    def test_create_view_results_section_method_exists(self, scan_view_class):
+        """Test that _create_view_results_section method exists."""
+        assert hasattr(scan_view_class, "_create_view_results_section")
