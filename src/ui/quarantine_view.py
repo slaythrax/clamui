@@ -250,6 +250,37 @@ class QuarantineView(Gtk.Box):
 
         return empty_box
 
+    def _create_no_results_state(self) -> Gtk.Widget:
+        """Create the no search results placeholder widget."""
+        no_results_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        no_results_box.set_valign(Gtk.Align.CENTER)
+        no_results_box.set_margin_top(48)
+        no_results_box.set_margin_bottom(48)
+        no_results_box.set_spacing(12)
+
+        # No results icon
+        icon = Gtk.Image()
+        icon.set_from_icon_name("edit-find-symbolic")
+        icon.set_pixel_size(64)
+        icon.add_css_class("dim-label")
+        no_results_box.append(icon)
+
+        # No results title
+        title = Gtk.Label()
+        title.set_text("No matching entries")
+        title.add_css_class("title-2")
+        title.add_css_class("dim-label")
+        no_results_box.append(title)
+
+        # No results subtitle
+        subtitle = Gtk.Label()
+        subtitle.set_text("Try a different search term")
+        subtitle.add_css_class("dim-label")
+        subtitle.add_css_class("caption")
+        no_results_box.append(subtitle)
+
+        return no_results_box
+
     def _create_loading_state(self) -> Gtk.ListBoxRow:
         """
         Create a loading state placeholder row widget.
