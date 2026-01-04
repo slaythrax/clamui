@@ -353,6 +353,34 @@ class StatisticsCalculator:
 
         return 0
 
+    def extract_entry_statistics(self, entry: LogEntry) -> dict:
+        """
+        Extract statistics from a single log entry.
+
+        Provides a clean interface for extracting scan statistics from an individual
+        log entry. Useful for displaying statistics in log detail views without
+        needing to aggregate across multiple entries.
+
+        Args:
+            entry: LogEntry to extract statistics from
+
+        Returns:
+            Dictionary with the following keys:
+                - files_scanned: Number of files scanned (int)
+                - directories_scanned: Number of directories scanned (int)
+                - duration: Scan duration in seconds (float)
+
+        Example:
+            >>> entry = LogEntry(...)
+            >>> stats = calculator.extract_entry_statistics(entry)
+            >>> print(f"Scanned {stats['files_scanned']} files in {stats['duration']}s")
+        """
+        return {
+            "files_scanned": self._extract_files_scanned(entry),
+            "directories_scanned": self._extract_directories_scanned(entry),
+            "duration": entry.duration,
+        }
+
     def get_statistics(self, timeframe: str = "all") -> ScanStatistics:
         """
         Calculate aggregated scan statistics for the specified timeframe.
