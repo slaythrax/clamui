@@ -30,6 +30,15 @@ THREATS_FOUND_PATTERNS = [
     re.compile(r"detected\s*(\d+)", re.IGNORECASE),
 ]
 
+# Pre-compiled regex patterns for extracting directory counts
+# These patterns are used to parse scan log entries for directory count information
+DIRS_SCANNED_PATTERNS = [
+    re.compile(r"(\d+)\s*director(?:y|ies)\s*scanned", re.IGNORECASE),
+    re.compile(r"scanned\s*(\d+)\s*director(?:y|ies)", re.IGNORECASE),
+    re.compile(r"director(?:y|ies)[:\s]+(\d+)", re.IGNORECASE),
+    re.compile(r"(\d+)\s*director(?:y|ies)", re.IGNORECASE),
+]
+
 
 class Timeframe(Enum):
     """Timeframe options for statistics aggregation."""
@@ -282,6 +291,31 @@ class StatisticsCalculator:
 
         # Use pre-compiled patterns for faster matching
         for pattern in FILES_SCANNED_PATTERNS:
+            match = pattern.search(text)
+            if match:
+                try:
+                    return int(match.group(1))
+                except (ValueError, IndexError):
+                    continue
+
+        return 0
+
+    def _extract_directories_scanned(self, entry: LogEntry) -> int:
+        """
+        Extract the number of directories scanned from a log entry.
+
+        Parses the summary or details to find directory count information.
+
+        Args:
+            entry: LogEntry to extract directory count from
+
+        Returns:
+            Number of directories scanned, or 0 if not found
+        """
+        text = f"{entry.summary} {entry.details}"
+
+        # Use pre-compiled patterns for faster matching
+        for pattern in DIRS_SCANNED_PATTERNS:
             match = pattern.search(text)
             if match:
                 try:
