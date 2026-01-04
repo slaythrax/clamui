@@ -25,6 +25,7 @@ from .scan_results_dialog import ScanResultsDialog
 from .utils import add_row_icon
 
 if TYPE_CHECKING:
+    from ..core.settings_manager import SettingsManager
     from ..profiles.models import ScanProfile
     from ..profiles.profile_manager import ProfileManager
 
@@ -45,17 +46,23 @@ class ScanView(Gtk.Box):
     - Results display area
     """
 
-    def __init__(self, **kwargs):
+    def __init__(
+        self, settings_manager: "SettingsManager | None" = None, **kwargs
+    ):
         """
         Initialize the scan view.
 
         Args:
+            settings_manager: Optional SettingsManager for exclusion patterns
             **kwargs: Additional arguments passed to parent
         """
         super().__init__(orientation=Gtk.Orientation.VERTICAL, **kwargs)
 
-        # Initialize scanner
-        self._scanner = Scanner()
+        # Store settings manager
+        self._settings_manager = settings_manager
+
+        # Initialize scanner with settings manager for exclusion patterns
+        self._scanner = Scanner(settings_manager=settings_manager)
 
         # Initialize quarantine manager
         self._quarantine_manager = QuarantineManager()
@@ -119,6 +126,9 @@ class ScanView(Gtk.Box):
 
         # Create the view results button (hidden initially)
         self._create_view_results_section()
+
+        # Create the backend indicator
+        self._create_backend_indicator()
 
         # Create the status bar
         self._create_status_bar()
@@ -392,13 +402,11 @@ class ScanView(Gtk.Box):
         # Profile selection frame
         profile_group = Adw.PreferencesGroup()
         profile_group.set_title("Scan Profile")
-        profile_group.set_description("Select a predefined scan configuration")
         self._profile_group = profile_group
 
         # Profile selection row
         profile_row = Adw.ActionRow()
         profile_row.set_title("Profile")
-        profile_row.set_subtitle("Choose a scan profile or use manual selection")
         add_row_icon(profile_row, "document-properties-symbolic")
         self._profile_row = profile_row
 
@@ -522,6 +530,14 @@ class ScanView(Gtk.Box):
             profile_idx = selected_idx - 1  # Adjust for "No Profile" option
             if 0 <= profile_idx < len(self._profile_list):
                 self._selected_profile = self._profile_list[profile_idx]
+                # Apply profile's targets to the selected path
+                if self._selected_profile.targets:
+                    first_target = self._selected_profile.targets[0]
+                    # Expand ~ in paths
+                    if first_target.startswith("~"):
+                        first_target = os.path.expanduser(first_target)
+                    if os.path.exists(first_target):
+                        self._set_selected_path(first_target)
             else:
                 self._selected_profile = None
 
@@ -558,12 +574,11 @@ class ScanView(Gtk.Box):
         # Container for selection UI
         selection_group = Adw.PreferencesGroup()
         selection_group.set_title("Scan Target")
-        selection_group.set_description("Choose a folder or file to scan")
 
         # Path display row
         self._path_row = Adw.ActionRow()
         self._path_row.set_title("Selected Path")
-        self._path_row.set_subtitle("No path selected")
+        self._path_row.set_subtitle("Drop files here or select on the right")
         add_row_icon(self._path_row, "folder-symbolic")
 
         # Path label for displaying selected path
@@ -806,16 +821,10 @@ class ScanView(Gtk.Box):
         if root is None:
             return
 
-        # Get settings manager from app for exclusion functionality
-        settings_manager = None
-        app = root.get_application() if hasattr(root, "get_application") else None
-        if app and hasattr(app, "_settings_manager"):
-            settings_manager = app._settings_manager
-
         dialog = ScanResultsDialog(
             scan_result=self._current_result,
             quarantine_manager=self._quarantine_manager,
-            settings_manager=settings_manager
+            settings_manager=self._settings_manager
         )
         dialog.present(root)
 
@@ -1011,6 +1020,25 @@ class ScanView(Gtk.Box):
         self._status_banner.remove_css_class("success")
         self._status_banner.remove_css_class("warning")
         self._status_banner.set_revealed(True)
+
+    def _create_backend_indicator(self):
+        """Create a small indicator showing the active scan backend."""
+        self._backend_label = Gtk.Label()
+        self._backend_label.set_halign(Gtk.Align.CENTER)
+        self._backend_label.add_css_class("dim-label")
+        self._backend_label.add_css_class("caption")
+        self._update_backend_label()
+        self.append(self._backend_label)
+
+    def _update_backend_label(self):
+        """Update the backend label with the current backend name."""
+        backend = self._scanner.get_active_backend()
+        backend_names = {
+            "daemon": "clamd (daemon)",
+            "clamscan": "clamscan (standalone)",
+        }
+        backend_display = backend_names.get(backend, backend)
+        self._backend_label.set_label(f"Backend: {backend_display}")
 
     def _create_status_bar(self):
         """Create the status banner."""

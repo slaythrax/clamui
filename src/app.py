@@ -149,7 +149,7 @@ class ClamUIApp(Adw.Application):
             win = MainWindow(application=self)
 
             # Create all views (kept in memory for state preservation)
-            self._scan_view = ScanView()
+            self._scan_view = ScanView(settings_manager=self._settings_manager)
             self._update_view = UpdateView()
             self._logs_view = LogsView()
             self._components_view = ComponentsView()

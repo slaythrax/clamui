@@ -107,8 +107,8 @@ class TestDaemonScannerBuildCommand:
 
         assert cmd[0] == "clamdscan"
 
-    def test_build_command_with_exclusions(self, tmp_path, daemon_scanner_class):
-        """Test _build_command includes exclusion patterns from settings."""
+    def test_build_command_without_exclusions(self, tmp_path, daemon_scanner_class):
+        """Test _build_command does NOT include --exclude (clamdscan doesn't support it)."""
         test_file = tmp_path / "test.txt"
         test_file.write_text("test content")
 
@@ -124,9 +124,10 @@ class TestDaemonScannerBuildCommand:
             with patch("src.core.daemon_scanner.wrap_host_command", side_effect=lambda x: x):
                 cmd = scanner._build_command(str(test_file), recursive=True)
 
-        # Check exclusions are added
-        assert "--exclude" in cmd
-        assert "--exclude-dir" in cmd
+        # clamdscan does NOT support --exclude options (they're silently ignored)
+        # Exclusions are handled post-scan via _filter_excluded_threats()
+        assert "--exclude" not in cmd
+        assert "--exclude-dir" not in cmd
 
 
 class TestDaemonScannerParseResults:
@@ -228,3 +229,124 @@ class TestDaemonScannerCancel:
         scanner.cancel()
 
         mock_process.terminate.assert_called_once()
+
+
+class TestDaemonScannerFilterExcludedThreats:
+    """Tests for DaemonScanner._filter_excluded_threats method."""
+
+    def test_filter_excludes_exact_path_match(self, daemon_scanner_class, scan_status_class):
+        """Test that exact path matches are filtered out."""
+        mock_settings = MagicMock()
+        mock_settings.get.return_value = [
+            {"pattern": "/home/user/eicar.txt", "type": "file", "enabled": True},
+        ]
+        scanner = daemon_scanner_class(settings_manager=mock_settings)
+
+        # Create a mock ThreatDetail
+        from src.core.scanner import ThreatDetail
+
+        threat = ThreatDetail(
+            file_path="/home/user/eicar.txt",
+            threat_name="Eicar-Test-Signature",
+            category="Test",
+            severity="low",
+        )
+
+        # Create infected result
+        from src.core.scanner import ScanResult
+
+        result = ScanResult(
+            status=scan_status_class.INFECTED,
+            path="/home/user",
+            stdout="",
+            stderr="",
+            exit_code=1,
+            infected_files=["/home/user/eicar.txt"],
+            scanned_files=1,
+            scanned_dirs=0,
+            infected_count=1,
+            error_message=None,
+            threat_details=[threat],
+        )
+
+        filtered = scanner._filter_excluded_threats(result)
+
+        # Should be clean since threat was excluded
+        assert filtered.status == scan_status_class.CLEAN
+        assert filtered.infected_count == 0
+        assert len(filtered.threat_details) == 0
+
+    def test_filter_keeps_non_excluded_threats(self, daemon_scanner_class, scan_status_class):
+        """Test that non-excluded threats are kept."""
+        mock_settings = MagicMock()
+        mock_settings.get.return_value = [
+            {"pattern": "/some/other/path.txt", "type": "file", "enabled": True},
+        ]
+        scanner = daemon_scanner_class(settings_manager=mock_settings)
+
+        from src.core.scanner import ScanResult, ThreatDetail
+
+        threat = ThreatDetail(
+            file_path="/home/user/virus.exe",
+            threat_name="Win.Trojan.Test",
+            category="Trojan",
+            severity="high",
+        )
+
+        result = ScanResult(
+            status=scan_status_class.INFECTED,
+            path="/home/user",
+            stdout="",
+            stderr="",
+            exit_code=1,
+            infected_files=["/home/user/virus.exe"],
+            scanned_files=1,
+            scanned_dirs=0,
+            infected_count=1,
+            error_message=None,
+            threat_details=[threat],
+        )
+
+        filtered = scanner._filter_excluded_threats(result)
+
+        # Should still be infected
+        assert filtered.status == scan_status_class.INFECTED
+        assert filtered.infected_count == 1
+        assert len(filtered.threat_details) == 1
+
+    def test_filter_respects_disabled_exclusions(self, daemon_scanner_class, scan_status_class):
+        """Test that disabled exclusions don't filter threats."""
+        mock_settings = MagicMock()
+        mock_settings.get.return_value = [
+            {"pattern": "/home/user/eicar.txt", "type": "file", "enabled": False},
+        ]
+        scanner = daemon_scanner_class(settings_manager=mock_settings)
+
+        from src.core.scanner import ScanResult, ThreatDetail
+
+        threat = ThreatDetail(
+            file_path="/home/user/eicar.txt",
+            threat_name="Eicar-Test-Signature",
+            category="Test",
+            severity="low",
+        )
+
+        result = ScanResult(
+            status=scan_status_class.INFECTED,
+            path="/home/user",
+            stdout="",
+            stderr="",
+            exit_code=1,
+            infected_files=["/home/user/eicar.txt"],
+            scanned_files=1,
+            scanned_dirs=0,
+            infected_count=1,
+            error_message=None,
+            threat_details=[threat],
+        )
+
+        filtered = scanner._filter_excluded_threats(result)
+
+        # Should still be infected since exclusion is disabled
+        assert filtered.status == scan_status_class.INFECTED
+        assert filtered.infected_count == 1

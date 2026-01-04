@@ -95,6 +95,9 @@ class ScanResultsDialog(Adw.Dialog):
 
     def _setup_ui(self):
         """Set up the dialog UI layout."""
+        # Toast overlay for notifications
+        self._toast_overlay = Adw.ToastOverlay()
+
         # Main container with toolbar view
         toolbar_view = Adw.ToolbarView()
 
@@ -146,7 +149,8 @@ class ScanResultsDialog(Adw.Dialog):
         scrolled.set_child(content_box)
         toolbar_view.set_content(scrolled)
 
-        self.set_child(toolbar_view)
+        self._toast_overlay.set_child(toolbar_view)
+        self.set_child(self._toast_overlay)
 
     def _create_stats_section(self, parent: Gtk.Box):
         """Create the statistics section."""
@@ -408,6 +412,7 @@ class ScanResultsDialog(Adw.Dialog):
     def _on_add_exclusion(self, button: Gtk.Button, threat: ThreatDetail):
         """Add threat's file path to exclusion list."""
         if self._settings_manager is None:
+            logger.warning("Cannot add exclusion: settings_manager is None")
             self._show_toast("Cannot access settings")
             return
 
@@ -516,7 +521,5 @@ class ScanResultsDialog(Adw.Dialog):
 
     def _show_toast(self, message: str):
         """Show a toast notification."""
-        root = self.get_root()
-        if root and hasattr(root, "add_toast"):
-            toast = Adw.Toast.new(message)
-            root.add_toast(toast)
+        toast = Adw.Toast.new(message)
+        self._toast_overlay.add_toast(toast)

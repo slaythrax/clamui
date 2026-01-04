@@ -1251,26 +1251,128 @@ class PreferencesWindow(Adw.PreferencesWindow):
         page.add(preset_group)
 
         # Custom exclusions group
-        custom_group = Adw.PreferencesGroup()
-        custom_group.set_title("Custom Exclusions")
-        custom_group.set_description("Add your own exclusion patterns")
+        self._custom_exclusions_group = Adw.PreferencesGroup()
+        self._custom_exclusions_group.set_title("Custom Exclusions")
+        self._custom_exclusions_group.set_description("Add your own exclusion patterns")
 
         # Custom exclusion entry row
-        custom_entry_row = Adw.EntryRow()
-        custom_entry_row.set_title("Add Pattern (e.g., /path/to/exclude or *.tmp)")
-        custom_entry_row.set_show_apply_button(False)
+        self._custom_entry_row = Adw.EntryRow()
+        self._custom_entry_row.set_title("Add Pattern (e.g., /path/to/exclude or *.tmp)")
+        self._custom_entry_row.set_show_apply_button(False)
 
         # Add button for custom exclusions
         add_button = Gtk.Button()
         add_button.set_label("Add")
         add_button.set_valign(Gtk.Align.CENTER)
         add_button.set_tooltip_text("Add custom exclusion pattern")
-        custom_entry_row.add_suffix(add_button)
+        add_button.connect("clicked", self._on_add_custom_exclusion)
+        self._custom_entry_row.add_suffix(add_button)
 
-        custom_group.add(custom_entry_row)
-        page.add(custom_group)
+        self._custom_exclusions_group.add(self._custom_entry_row)
+
+        # Load and display existing custom exclusions
+        self._load_custom_exclusions()
+
+        page.add(self._custom_exclusions_group)
 
         self.add(page)
+
+    def _load_custom_exclusions(self):
+        """Load and display custom exclusions from settings."""
+        if self._settings_manager is None:
+            return
+
+        exclusions = self._settings_manager.get("exclusion_patterns", [])
+        if not isinstance(exclusions, list):
+            return
+
+        for exclusion in exclusions:
+            pattern = exclusion.get("pattern", "")
+            if pattern:
+                self._add_custom_exclusion_row(pattern, exclusion.get("enabled", True))
+
+    def _add_custom_exclusion_row(self, pattern: str, enabled: bool = True):
+        """Add a row for a custom exclusion pattern."""
+        row = Adw.SwitchRow()
+        row.set_title(pattern)
+        row.set_active(enabled)
+
+        # Connect switch to save enabled state
+        row.connect("notify::active", self._on_exclusion_toggled, pattern)
+
+        # Remove button
+        remove_button = Gtk.Button()
+        remove_button.set_icon_name("user-trash-symbolic")
+        remove_button.set_valign(Gtk.Align.CENTER)
+        remove_button.add_css_class("flat")
+        remove_button.set_tooltip_text("Remove exclusion")
+        remove_button.connect("clicked", self._on_remove_custom_exclusion, row, pattern)
+        row.add_suffix(remove_button)
+
+        # Insert before the entry row (which is always last)
+        self._custom_exclusions_group.add(row)
+
+    def _on_exclusion_toggled(self, row, param_spec, pattern: str):
+        """Handle exclusion toggle state change."""
+        if self._settings_manager is None:
+            return
+
+        enabled = row.get_active()
+        exclusions = self._settings_manager.get("exclusion_patterns", [])
+        if isinstance(exclusions, list):
+            for excl in exclusions:
+                if excl.get("pattern") == pattern:
+                    excl["enabled"] = enabled
+                    break
+            self._settings_manager.set("exclusion_patterns", exclusions)
+
+    def _on_add_custom_exclusion(self, button):
+        """Handle adding a new custom exclusion."""
+        pattern = self._custom_entry_row.get_text().strip()
+        if not pattern:
+            return
+
+        if self._settings_manager is None:
+            return
+
+        # Get current exclusions
+        exclusions = self._settings_manager.get("exclusion_patterns", [])
+        if not isinstance(exclusions, list):
+            exclusions = []
+
+        # Check if already exists
+        for excl in exclusions:
+            if excl.get("pattern") == pattern:
+                return  # Already exists
+
+        # Add new exclusion
+        new_exclusion = {
+            "pattern": pattern,
+            "type": "file" if pattern.startswith("/") else "pattern",
+            "enabled": True,
+        }
+        exclusions.append(new_exclusion)
+        self._settings_manager.set("exclusion_patterns", exclusions)
+
+        # Add row to UI
+        self._add_custom_exclusion_row(pattern, True)
+
+        # Clear entry
+        self._custom_entry_row.set_text("")
+
+    def _on_remove_custom_exclusion(self, button, row, pattern: str):
+        """Handle removing a custom exclusion."""
+        if self._settings_manager is None:
+            return
+
+        # Remove from settings
+        exclusions = self._settings_manager.get("exclusion_patterns", [])
+        if isinstance(exclusions, list):
+            exclusions = [e for e in exclusions if e.get("pattern") != pattern]
+            self._settings_manager.set("exclusion_patterns", exclusions)
+
+        # Remove row from UI
+        self._custom_exclusions_group.remove(row)
 
     def _create_save_page(self):
         """

@@ -181,6 +181,10 @@ class DaemonScanner:
 
             # Parse the results
             result = self._parse_results(path, stdout, stderr, exit_code, file_count, dir_count)
+
+            # Apply exclusion filtering (clamdscan doesn't support --exclude)
+            result = self._filter_excluded_threats(result, profile_exclusions)
+
             duration = time.monotonic() - start_time
             self._save_scan_log(result, duration)
             return result
@@ -305,40 +309,9 @@ class DaemonScanner:
         # Show infected files only
         cmd.append("-i")
 
-        # Note: clamdscan exclusions work differently than clamscan
-        # It uses --exclude and --exclude-dir with regex patterns
-        if self._settings_manager is not None:
-            exclusions = self._settings_manager.get("exclusion_patterns", [])
-            for exclusion in exclusions:
-                if not exclusion.get("enabled", True):
-                    continue
-
-                pattern = exclusion.get("pattern", "")
-                if not pattern:
-                    continue
-
-                regex = glob_to_regex(pattern)
-                exclusion_type = exclusion.get("type", "pattern")
-
-                if exclusion_type == "directory":
-                    cmd.extend(["--exclude-dir", regex])
-                else:
-                    cmd.extend(["--exclude", regex])
-
-        # Apply profile exclusions
-        if profile_exclusions:
-            for excl_path in profile_exclusions.get("paths", []):
-                if not excl_path:
-                    continue
-                if excl_path.startswith("~"):
-                    excl_path = str(Path(excl_path).expanduser())
-                cmd.extend(["--exclude-dir", excl_path])
-
-            for pattern in profile_exclusions.get("patterns", []):
-                if not pattern:
-                    continue
-                regex = glob_to_regex(pattern)
-                cmd.extend(["--exclude", regex])
+        # NOTE: clamdscan does NOT support --exclude or --exclude-dir options
+        # (it silently ignores them with a warning). Exclusion filtering is
+        # performed post-scan in _filter_excluded_threats() instead.
 
         cmd.append(path)
         return wrap_host_command(cmd)
@@ -534,6 +507,100 @@ class DaemonScanner:
             infected_count=infected_count,
             error_message=stderr if status == ScanStatus.ERROR else None,
             threat_details=threat_details,
+        )
+
+    def _filter_excluded_threats(
+        self, result: ScanResult, profile_exclusions: dict | None = None
+    ) -> ScanResult:
+        """
+        Filter out threats that match exclusion patterns.
+
+        Since clamdscan doesn't support --exclude options, we filter the
+        results post-scan to remove any threats matching exclusion patterns.
+
+        Args:
+            result: The parsed ScanResult
+            profile_exclusions: Optional exclusions from a scan profile
+
+        Returns:
+            A new ScanResult with excluded threats filtered out
+        """
+        if result.status != ScanStatus.INFECTED or not result.threat_details:
+            return result
+
+        # Collect all exclusion patterns
+        exclude_patterns: list[str] = []
+
+        # Global exclusions from settings
+        if self._settings_manager is not None:
+            exclusions = self._settings_manager.get("exclusion_patterns", [])
+            for exclusion in exclusions:
+                if not exclusion.get("enabled", True):
+                    continue
+                pattern = exclusion.get("pattern", "")
+                if pattern:
+                    exclude_patterns.append(pattern)
+
+        # Profile exclusions (patterns only, paths are for directories)
+        if profile_exclusions:
+            for pattern in profile_exclusions.get("patterns", []):
+                if pattern:
+                    exclude_patterns.append(pattern)
+
+        if not exclude_patterns:
+            return result
+
+        # Filter threats
+        filtered_threats = []
+        filtered_files = []
+
+        for threat in result.threat_details:
+            file_path = threat.file_path
+            is_excluded = False
+
+            for pattern in exclude_patterns:
+                # Expand ~ in patterns
+                if pattern.startswith("~"):
+                    pattern = str(Path(pattern).expanduser())
+
+                # Check for exact path match or fnmatch pattern match
+                if file_path == pattern or fnmatch.fnmatch(file_path, pattern):
+                    is_excluded = True
+                    break
+
+            if not is_excluded:
+                filtered_threats.append(threat)
+                filtered_files.append(file_path)
+
+        # If all threats were filtered, return CLEAN status
+        if not filtered_threats:
+            return ScanResult(
+                status=ScanStatus.CLEAN,
+                path=result.path,
+                stdout=result.stdout,
+                stderr=result.stderr,
+                exit_code=result.exit_code,
+                infected_files=[],
+                scanned_files=result.scanned_files,
+                scanned_dirs=result.scanned_dirs,
+                infected_count=0,
+                error_message=None,
+                threat_details=[],
+            )
+
+        # Return result with filtered threats
+        return ScanResult(
+            status=ScanStatus.INFECTED,
+            path=result.path,
+            stdout=result.stdout,
+            stderr=result.stderr,
+            exit_code=result.exit_code,
+            infected_files=filtered_files,
+            scanned_files=result.scanned_files,
+            scanned_dirs=result.scanned_dirs,
+            infected_count=len(filtered_threats),
+            error_message=None,
+            threat_details=filtered_threats,
         )
 
     def _save_scan_log(self, result: ScanResult, duration: float) -> None:
