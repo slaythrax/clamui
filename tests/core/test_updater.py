@@ -1,0 +1,822 @@
+# ClamUI Updater Tests
+"""
+Comprehensive unit tests for the freshclam updater module.
+
+Tests cover:
+- get_pkexec_path() function
+- UpdateStatus enum values
+- UpdateResult dataclass and properties
+- FreshclamUpdater class methods including async operations
+"""
+
+from unittest.mock import MagicMock, patch
+
+import pytest
+
+
+@pytest.fixture
+def updater_module():
+    """Import updater module and provide mocked GLib for async tests."""
+    from src.core.updater import FreshclamUpdater, UpdateResult, UpdateStatus, get_pkexec_path
+
+    # Create mock GLib for async callback testing
+    mock_glib = MagicMock()
+    mock_glib.idle_add = MagicMock(side_effect=lambda cb, *args: cb(*args))
+
+    yield {
+        "FreshclamUpdater": FreshclamUpdater,
+        "UpdateResult": UpdateResult,
+        "UpdateStatus": UpdateStatus,
+        "get_pkexec_path": get_pkexec_path,
+        "glib": mock_glib,
+    }
+
+
+# =============================================================================
+# get_pkexec_path() Tests
+# =============================================================================
+
+
+class TestGetPkexecPath:
+    """Tests for the get_pkexec_path utility function."""
+
+    def test_returns_path_when_pkexec_available(self, updater_module):
+        """Test returns path when pkexec is found."""
+        get_pkexec_path = updater_module["get_pkexec_path"]
+        with patch("shutil.which", return_value="/usr/bin/pkexec"):
+            result = get_pkexec_path()
+            assert result == "/usr/bin/pkexec"
+
+    def test_returns_none_when_pkexec_not_found(self, updater_module):
+        """Test returns None when pkexec is not found."""
+        get_pkexec_path = updater_module["get_pkexec_path"]
+        with patch("shutil.which", return_value=None):
+            result = get_pkexec_path()
+            assert result is None
+
+
+# =============================================================================
+# UpdateStatus Enum Tests
+# =============================================================================
+
+
+class TestUpdateStatusEnum:
+    """Tests for the UpdateStatus enum."""
+
+    def test_all_status_levels_defined(self, updater_module):
+        """Verify all expected status levels are defined."""
+        UpdateStatus = updater_module["UpdateStatus"]
+        assert hasattr(UpdateStatus, "SUCCESS")
+        assert hasattr(UpdateStatus, "UP_TO_DATE")
+        assert hasattr(UpdateStatus, "ERROR")
+        assert hasattr(UpdateStatus, "CANCELLED")
+
+    def test_status_values(self, updater_module):
+        """Verify status string values."""
+        UpdateStatus = updater_module["UpdateStatus"]
+        assert UpdateStatus.SUCCESS.value == "success"
+        assert UpdateStatus.UP_TO_DATE.value == "up_to_date"
+        assert UpdateStatus.ERROR.value == "error"
+        assert UpdateStatus.CANCELLED.value == "cancelled"
+
+    def test_status_count(self, updater_module):
+        """Verify exactly 4 status levels defined."""
+        UpdateStatus = updater_module["UpdateStatus"]
+        assert len(UpdateStatus) == 4
+
+
+# =============================================================================
+# UpdateResult Dataclass Tests
+# =============================================================================
+
+
+class TestUpdateResultDataclass:
+    """Tests for the UpdateResult dataclass."""
+
+    def test_is_success_returns_true_for_success(self, updater_module):
+        """Test is_success property returns True for SUCCESS status."""
+        UpdateResult = updater_module["UpdateResult"]
+        UpdateStatus = updater_module["UpdateStatus"]
+        result = UpdateResult(
+            status=UpdateStatus.SUCCESS,
+            stdout="",
+            stderr="",
+            exit_code=0,
+            databases_updated=1,
+            error_message=None,
+        )
+        assert result.is_success is True
+
+    def test_is_success_returns_true_for_up_to_date(self, updater_module):
+        """Test is_success property returns True for UP_TO_DATE status."""
+        UpdateResult = updater_module["UpdateResult"]
+        UpdateStatus = updater_module["UpdateStatus"]
+        result = UpdateResult(
+            status=UpdateStatus.UP_TO_DATE,
+            stdout="",
+            stderr="",
+            exit_code=0,
+            databases_updated=0,
+            error_message=None,
+        )
+        assert result.is_success is True
+
+    def test_is_success_returns_false_for_error(self, updater_module):
+        """Test is_success property returns False for ERROR status."""
+        UpdateResult = updater_module["UpdateResult"]
+        UpdateStatus = updater_module["UpdateStatus"]
+        result = UpdateResult(
+            status=UpdateStatus.ERROR,
+            stdout="",
+            stderr="Error occurred",
+            exit_code=1,
+            databases_updated=0,
+            error_message="Error occurred",
+        )
+        assert result.is_success is False
+
+    def test_is_success_returns_false_for_cancelled(self, updater_module):
+        """Test is_success property returns False for CANCELLED status."""
+        UpdateResult = updater_module["UpdateResult"]
+        UpdateStatus = updater_module["UpdateStatus"]
+        result = UpdateResult(
+            status=UpdateStatus.CANCELLED,
+            stdout="",
+            stderr="",
+            exit_code=0,
+            databases_updated=0,
+            error_message="Cancelled",
+        )
+        assert result.is_success is False
+
+    def test_has_error_returns_true_only_for_error(self, updater_module):
+        """Test has_error property returns True only for ERROR status."""
+        UpdateResult = updater_module["UpdateResult"]
+        UpdateStatus = updater_module["UpdateStatus"]
+
+        error_result = UpdateResult(
+            status=UpdateStatus.ERROR,
+            stdout="",
+            stderr="",
+            exit_code=1,
+            databases_updated=0,
+            error_message="Error",
+        )
+        assert error_result.has_error is True
+
+        success_result = UpdateResult(
+            status=UpdateStatus.SUCCESS,
+            stdout="",
+            stderr="",
+            exit_code=0,
+            databases_updated=1,
+            error_message=None,
+        )
+        assert success_result.has_error is False
+
+        cancelled_result = UpdateResult(
+            status=UpdateStatus.CANCELLED,
+            stdout="",
+            stderr="",
+            exit_code=0,
+            databases_updated=0,
+            error_message="Cancelled",
+        )
+        assert cancelled_result.has_error is False
+
+
+# =============================================================================
+# FreshclamUpdater Initialization Tests
+# =============================================================================
+
+
+class TestFreshclamUpdaterInit:
+    """Tests for FreshclamUpdater initialization."""
+
+    def test_init_with_custom_log_manager(self, updater_module):
+        """Test initialization with custom LogManager."""
+        FreshclamUpdater = updater_module["FreshclamUpdater"]
+        mock_log_manager = MagicMock()
+        updater = FreshclamUpdater(log_manager=mock_log_manager)
+        assert updater._log_manager is mock_log_manager
+
+    def test_init_sets_process_to_none(self, updater_module):
+        """Test initialization sets _current_process to None."""
+        FreshclamUpdater = updater_module["FreshclamUpdater"]
+        updater = FreshclamUpdater(log_manager=MagicMock())
+        assert updater._current_process is None
+
+    def test_init_sets_cancelled_to_false(self, updater_module):
+        """Test initialization sets _update_cancelled to False."""
+        FreshclamUpdater = updater_module["FreshclamUpdater"]
+        updater = FreshclamUpdater(log_manager=MagicMock())
+        assert updater._update_cancelled is False
+
+
+# =============================================================================
+# FreshclamUpdater.check_available() Tests
+# =============================================================================
+
+
+class TestFreshclamUpdaterCheckAvailable:
+    """Tests for FreshclamUpdater.check_available()."""
+
+    def test_returns_true_and_version_when_installed(self, updater_module):
+        """Test returns (True, version) when freshclam is installed."""
+        FreshclamUpdater = updater_module["FreshclamUpdater"]
+        with patch(
+            "src.core.updater.check_freshclam_installed", return_value=(True, "1.0.0")
+        ):
+            updater = FreshclamUpdater(log_manager=MagicMock())
+            is_available, version = updater.check_available()
+            assert is_available is True
+            assert version == "1.0.0"
+
+    def test_returns_false_and_error_when_not_installed(self, updater_module):
+        """Test returns (False, error) when freshclam is not installed."""
+        FreshclamUpdater = updater_module["FreshclamUpdater"]
+        with patch(
+            "src.core.updater.check_freshclam_installed",
+            return_value=(False, "freshclam not found"),
+        ):
+            updater = FreshclamUpdater(log_manager=MagicMock())
+            is_available, error = updater.check_available()
+            assert is_available is False
+            assert error == "freshclam not found"
+
+
+# =============================================================================
+# FreshclamUpdater._build_command() Tests
+# =============================================================================
+
+
+class TestFreshclamUpdaterBuildCommand:
+    """Tests for FreshclamUpdater._build_command()."""
+
+    def test_build_command_with_pkexec(self, updater_module):
+        """Test command includes pkexec when available."""
+        FreshclamUpdater = updater_module["FreshclamUpdater"]
+        with patch("src.core.updater.get_freshclam_path", return_value="/usr/bin/freshclam"):
+            with patch("src.core.updater.get_pkexec_path", return_value="/usr/bin/pkexec"):
+                with patch("src.core.updater.wrap_host_command", side_effect=lambda x: x):
+                    updater = FreshclamUpdater(log_manager=MagicMock())
+                    cmd = updater._build_command()
+                    assert cmd[0] == "/usr/bin/pkexec"
+                    assert cmd[1] == "/usr/bin/freshclam"
+                    assert "--verbose" in cmd
+
+    def test_build_command_without_pkexec(self, updater_module):
+        """Test command uses freshclam directly when pkexec not available."""
+        FreshclamUpdater = updater_module["FreshclamUpdater"]
+        with patch("src.core.updater.get_freshclam_path", return_value="/usr/bin/freshclam"):
+            with patch("src.core.updater.get_pkexec_path", return_value=None):
+                with patch("src.core.updater.wrap_host_command", side_effect=lambda x: x):
+                    updater = FreshclamUpdater(log_manager=MagicMock())
+                    cmd = updater._build_command()
+                    assert cmd[0] == "/usr/bin/freshclam"
+                    assert "--verbose" in cmd
+
+    def test_build_command_uses_wrap_host_command(self, updater_module):
+        """Test command is wrapped for Flatpak compatibility."""
+        FreshclamUpdater = updater_module["FreshclamUpdater"]
+        with patch("src.core.updater.get_freshclam_path", return_value="freshclam"):
+            with patch("src.core.updater.get_pkexec_path", return_value=None):
+                with patch("src.core.updater.wrap_host_command") as mock_wrap:
+                    mock_wrap.return_value = ["flatpak-spawn", "--host", "freshclam", "--verbose"]
+                    updater = FreshclamUpdater(log_manager=MagicMock())
+                    cmd = updater._build_command()
+                    mock_wrap.assert_called_once()
+                    assert cmd[0] == "flatpak-spawn"
+
+
+# =============================================================================
+# FreshclamUpdater._parse_results() Tests
+# =============================================================================
+
+
+class TestFreshclamUpdaterParseResults:
+    """Tests for FreshclamUpdater._parse_results()."""
+
+    def test_parse_success_with_updates(self, updater_module):
+        """Test parsing successful update with database updates."""
+        FreshclamUpdater = updater_module["FreshclamUpdater"]
+        UpdateStatus = updater_module["UpdateStatus"]
+        stdout = """
+daily.cvd updated (version: 27150, sigs: 2050000, f-level: 90, builder: virusdb)
+main.cvd updated (version: 62, sigs: 6500000, f-level: 90, builder: virusdb)
+"""
+        updater = FreshclamUpdater(log_manager=MagicMock())
+        result = updater._parse_results(stdout, "", 0)
+        assert result.status == UpdateStatus.SUCCESS
+        assert result.databases_updated == 2
+        assert result.error_message is None
+
+    def test_parse_up_to_date(self, updater_module):
+        """Test parsing when database is already up-to-date."""
+        FreshclamUpdater = updater_module["FreshclamUpdater"]
+        UpdateStatus = updater_module["UpdateStatus"]
+        stdout = """
+daily.cvd database is up-to-date (version: 27150, sigs: 2050000, f-level: 90, builder: virusdb)
+main.cvd database is up-to-date (version: 62, sigs: 6500000, f-level: 90, builder: virusdb)
+"""
+        updater = FreshclamUpdater(log_manager=MagicMock())
+        result = updater._parse_results(stdout, "", 0)
+        assert result.status == UpdateStatus.UP_TO_DATE
+        assert result.databases_updated == 0
+        assert result.error_message is None
+
+    def test_parse_error_code(self, updater_module):
+        """Test parsing error with non-zero code."""
+        FreshclamUpdater = updater_module["FreshclamUpdater"]
+        UpdateStatus = updater_module["UpdateStatus"]
+        updater = FreshclamUpdater(log_manager=MagicMock())
+        result = updater._parse_results("", "Error occurred", 1)
+        assert result.status == UpdateStatus.ERROR
+        assert result.error_message is not None
+
+    def test_parse_mixed_updates_and_up_to_date(self, updater_module):
+        """Test parsing when some databases updated, some up-to-date."""
+        FreshclamUpdater = updater_module["FreshclamUpdater"]
+        UpdateStatus = updater_module["UpdateStatus"]
+        stdout = """
+daily.cvd updated (version: 27150, sigs: 2050000, f-level: 90, builder: virusdb)
+main.cvd database is up-to-date (version: 62, sigs: 6500000, f-level: 90, builder: virusdb)
+"""
+        updater = FreshclamUpdater(log_manager=MagicMock())
+        result = updater._parse_results(stdout, "", 0)
+        assert result.status == UpdateStatus.SUCCESS
+        assert result.databases_updated == 1
+
+
+# =============================================================================
+# FreshclamUpdater._extract_error_message() Tests
+# =============================================================================
+
+
+class TestFreshclamUpdaterExtractErrorMessage:
+    """Tests for FreshclamUpdater._extract_error_message()."""
+
+    def test_auth_cancelled_code_126(self, updater_module):
+        """Test code 126 returns auth cancelled message."""
+        FreshclamUpdater = updater_module["FreshclamUpdater"]
+        updater = FreshclamUpdater(log_manager=MagicMock())
+        msg = updater._extract_error_message("", "", 126)
+        assert "Authentication cancelled" in msg
+
+    def test_auth_failed_code_127_with_pkexec(self, updater_module):
+        """Test code 127 with pkexec in output returns auth failed message."""
+        FreshclamUpdater = updater_module["FreshclamUpdater"]
+        updater = FreshclamUpdater(log_manager=MagicMock())
+        msg = updater._extract_error_message("pkexec error", "", 127)
+        assert "Authorization failed" in msg
+
+    def test_not_authorized_in_output(self, updater_module):
+        """Test 'not authorized' in output returns auth message."""
+        FreshclamUpdater = updater_module["FreshclamUpdater"]
+        updater = FreshclamUpdater(log_manager=MagicMock())
+        msg = updater._extract_error_message("", "not authorized to perform this action", 1)
+        assert "Authorization failed" in msg
+
+    def test_locked_in_output(self, updater_module):
+        """Test 'locked' in output returns lock message."""
+        FreshclamUpdater = updater_module["FreshclamUpdater"]
+        updater = FreshclamUpdater(log_manager=MagicMock())
+        msg = updater._extract_error_message("Database is locked", "", 1)
+        assert "locked" in msg.lower()
+
+    def test_permission_denied_in_output(self, updater_module):
+        """Test 'permission denied' in output returns permission message."""
+        FreshclamUpdater = updater_module["FreshclamUpdater"]
+        updater = FreshclamUpdater(log_manager=MagicMock())
+        msg = updater._extract_error_message("", "permission denied", 1)
+        assert "Permission denied" in msg
+
+    def test_connection_error_in_output(self, updater_module):
+        """Test connection error patterns return connection message."""
+        FreshclamUpdater = updater_module["FreshclamUpdater"]
+        updater = FreshclamUpdater(log_manager=MagicMock())
+        msg = updater._extract_error_message("can't connect to server", "", 1)
+        assert "Connection error" in msg
+
+    def test_dns_error_in_output(self, updater_module):
+        """Test DNS error patterns return DNS message."""
+        FreshclamUpdater = updater_module["FreshclamUpdater"]
+        updater = FreshclamUpdater(log_manager=MagicMock())
+        msg = updater._extract_error_message("can't resolve hostname", "", 1)
+        assert "DNS resolution failed" in msg
+
+    def test_fallback_to_stderr(self, updater_module):
+        """Test fallback to stderr content when no pattern matches."""
+        FreshclamUpdater = updater_module["FreshclamUpdater"]
+        updater = FreshclamUpdater(log_manager=MagicMock())
+        msg = updater._extract_error_message("", "Some unknown error message", 1)
+        assert msg == "Some unknown error message"
+
+    def test_fallback_to_unknown_error(self, updater_module):
+        """Test fallback to unknown error when stderr empty."""
+        FreshclamUpdater = updater_module["FreshclamUpdater"]
+        updater = FreshclamUpdater(log_manager=MagicMock())
+        msg = updater._extract_error_message("", "", 1)
+        assert "unknown error" in msg.lower()
+
+
+# =============================================================================
+# FreshclamUpdater.update_sync() Tests
+# =============================================================================
+
+
+class TestFreshclamUpdaterUpdateSync:
+    """Tests for FreshclamUpdater.update_sync()."""
+
+    def test_successful_update(self, updater_module):
+        """Test successful database update."""
+        FreshclamUpdater = updater_module["FreshclamUpdater"]
+        UpdateStatus = updater_module["UpdateStatus"]
+        mock_log_manager = MagicMock()
+        mock_stdout = "daily.cvd updated (version: 27150, sigs: 2050000, f-level: 90, builder: virusdb)"
+
+        with patch("src.core.updater.check_freshclam_installed", return_value=(True, "1.0.0")):
+            with patch("src.core.updater.get_freshclam_path", return_value="freshclam"):
+                with patch("src.core.updater.get_pkexec_path", return_value=None):
+                    with patch("src.core.updater.wrap_host_command", side_effect=lambda x: x):
+                        with patch("subprocess.Popen") as mock_popen:
+                            mock_process = MagicMock()
+                            mock_process.communicate.return_value = (mock_stdout, "")
+                            mock_process.returncode = 0
+                            mock_process.kill = MagicMock()
+                            mock_process.wait = MagicMock()
+                            mock_popen.return_value = mock_process
+
+                            updater = FreshclamUpdater(log_manager=mock_log_manager)
+                            result = updater.update_sync()
+
+                            assert result.status == UpdateStatus.SUCCESS
+                            assert result.databases_updated == 1
+                            mock_log_manager.save_log.assert_called_once()
+
+    def test_already_up_to_date(self, updater_module):
+        """Test when database is already up-to-date."""
+        FreshclamUpdater = updater_module["FreshclamUpdater"]
+        UpdateStatus = updater_module["UpdateStatus"]
+        mock_log_manager = MagicMock()
+        mock_stdout = "daily.cvd database is up-to-date (version: 27150)"
+
+        with patch("src.core.updater.check_freshclam_installed", return_value=(True, "1.0.0")):
+            with patch("src.core.updater.get_freshclam_path", return_value="freshclam"):
+                with patch("src.core.updater.get_pkexec_path", return_value=None):
+                    with patch("src.core.updater.wrap_host_command", side_effect=lambda x: x):
+                        with patch("subprocess.Popen") as mock_popen:
+                            mock_process = MagicMock()
+                            mock_process.communicate.return_value = (mock_stdout, "")
+                            mock_process.returncode = 0
+                            mock_process.kill = MagicMock()
+                            mock_process.wait = MagicMock()
+                            mock_popen.return_value = mock_process
+
+                            updater = FreshclamUpdater(log_manager=mock_log_manager)
+                            result = updater.update_sync()
+
+                            assert result.status == UpdateStatus.UP_TO_DATE
+                            assert result.databases_updated == 0
+
+    def test_error_return_code(self, updater_module):
+        """Test error handling for non-zero return code."""
+        FreshclamUpdater = updater_module["FreshclamUpdater"]
+        UpdateStatus = updater_module["UpdateStatus"]
+        mock_log_manager = MagicMock()
+
+        with patch("src.core.updater.check_freshclam_installed", return_value=(True, "1.0.0")):
+            with patch("src.core.updater.get_freshclam_path", return_value="freshclam"):
+                with patch("src.core.updater.get_pkexec_path", return_value=None):
+                    with patch("src.core.updater.wrap_host_command", side_effect=lambda x: x):
+                        with patch("subprocess.Popen") as mock_popen:
+                            mock_process = MagicMock()
+                            mock_process.communicate.return_value = ("", "Error occurred")
+                            mock_process.returncode = 1
+                            mock_process.kill = MagicMock()
+                            mock_process.wait = MagicMock()
+                            mock_popen.return_value = mock_process
+
+                            updater = FreshclamUpdater(log_manager=mock_log_manager)
+                            result = updater.update_sync()
+
+                            assert result.status == UpdateStatus.ERROR
+                            assert result.has_error is True
+
+    def test_freshclam_not_installed(self, updater_module):
+        """Test handling when freshclam is not installed."""
+        FreshclamUpdater = updater_module["FreshclamUpdater"]
+        UpdateStatus = updater_module["UpdateStatus"]
+        mock_log_manager = MagicMock()
+
+        with patch(
+            "src.core.updater.check_freshclam_installed",
+            return_value=(False, "freshclam not found"),
+        ):
+            updater = FreshclamUpdater(log_manager=mock_log_manager)
+            result = updater.update_sync()
+
+            assert result.status == UpdateStatus.ERROR
+            assert "freshclam" in result.stderr.lower() or "not" in result.stderr.lower()
+
+    def test_file_not_found_error(self, updater_module):
+        """Test handling FileNotFoundError."""
+        FreshclamUpdater = updater_module["FreshclamUpdater"]
+        UpdateStatus = updater_module["UpdateStatus"]
+        mock_log_manager = MagicMock()
+
+        with patch("src.core.updater.check_freshclam_installed", return_value=(True, "1.0.0")):
+            with patch("src.core.updater.get_freshclam_path", return_value="freshclam"):
+                with patch("src.core.updater.get_pkexec_path", return_value=None):
+                    with patch("src.core.updater.wrap_host_command", side_effect=lambda x: x):
+                        with patch("subprocess.Popen") as mock_popen:
+                            mock_popen.side_effect = FileNotFoundError("freshclam not found")
+
+                            updater = FreshclamUpdater(log_manager=mock_log_manager)
+                            result = updater.update_sync()
+
+                            assert result.status == UpdateStatus.ERROR
+                            assert "not found" in result.error_message.lower()
+
+    def test_permission_error(self, updater_module):
+        """Test handling PermissionError."""
+        FreshclamUpdater = updater_module["FreshclamUpdater"]
+        UpdateStatus = updater_module["UpdateStatus"]
+        mock_log_manager = MagicMock()
+
+        with patch("src.core.updater.check_freshclam_installed", return_value=(True, "1.0.0")):
+            with patch("src.core.updater.get_freshclam_path", return_value="freshclam"):
+                with patch("src.core.updater.get_pkexec_path", return_value=None):
+                    with patch("src.core.updater.wrap_host_command", side_effect=lambda x: x):
+                        with patch("subprocess.Popen") as mock_popen:
+                            mock_popen.side_effect = PermissionError("Access denied")
+
+                            updater = FreshclamUpdater(log_manager=mock_log_manager)
+                            result = updater.update_sync()
+
+                            assert result.status == UpdateStatus.ERROR
+                            assert "Permission denied" in result.error_message
+
+    def test_generic_runtime_error(self, updater_module):
+        """Test handling generic RuntimeError."""
+        FreshclamUpdater = updater_module["FreshclamUpdater"]
+        UpdateStatus = updater_module["UpdateStatus"]
+        mock_log_manager = MagicMock()
+
+        with patch("src.core.updater.check_freshclam_installed", return_value=(True, "1.0.0")):
+            with patch("src.core.updater.get_freshclam_path", return_value="freshclam"):
+                with patch("src.core.updater.get_pkexec_path", return_value=None):
+                    with patch("src.core.updater.wrap_host_command", side_effect=lambda x: x):
+                        with patch("subprocess.Popen") as mock_popen:
+                            mock_popen.side_effect = RuntimeError("Unexpected error")
+
+                            updater = FreshclamUpdater(log_manager=mock_log_manager)
+                            result = updater.update_sync()
+
+                            assert result.status == UpdateStatus.ERROR
+                            assert "Update failed" in result.error_message
+
+    def test_cancelled_during_run(self, updater_module):
+        """Test cancellation during update run."""
+        FreshclamUpdater = updater_module["FreshclamUpdater"]
+        UpdateStatus = updater_module["UpdateStatus"]
+        mock_log_manager = MagicMock()
+
+        with patch("src.core.updater.check_freshclam_installed", return_value=(True, "1.0.0")):
+            with patch("src.core.updater.get_freshclam_path", return_value="freshclam"):
+                with patch("src.core.updater.get_pkexec_path", return_value=None):
+                    with patch("src.core.updater.wrap_host_command", side_effect=lambda x: x):
+                        with patch("subprocess.Popen") as mock_popen:
+                            mock_process = MagicMock()
+
+                            updater = FreshclamUpdater(log_manager=mock_log_manager)
+
+                            def simulate_cancel():
+                                # Simulate cancellation happening during communicate()
+                                updater._update_cancelled = True
+                                return ("", "")
+
+                            mock_process.communicate.side_effect = simulate_cancel
+                            mock_process.returncode = 0
+                            mock_process.kill = MagicMock()
+                            mock_process.wait = MagicMock()
+                            mock_popen.return_value = mock_process
+
+                            result = updater.update_sync()
+
+                            assert result.status == UpdateStatus.CANCELLED
+
+
+# =============================================================================
+# FreshclamUpdater.cancel() Tests
+# =============================================================================
+
+
+class TestFreshclamUpdaterCancel:
+    """Tests for FreshclamUpdater.cancel()."""
+
+    def test_cancel_sets_cancelled_flag(self, updater_module):
+        """Test cancel sets _update_cancelled flag."""
+        FreshclamUpdater = updater_module["FreshclamUpdater"]
+        updater = FreshclamUpdater(log_manager=MagicMock())
+        updater._update_cancelled = False
+        updater.cancel()
+        assert updater._update_cancelled is True
+
+    def test_cancel_terminates_current_process(self, updater_module):
+        """Test cancel terminates the current process."""
+        FreshclamUpdater = updater_module["FreshclamUpdater"]
+        updater = FreshclamUpdater(log_manager=MagicMock())
+        mock_process = MagicMock()
+        updater._current_process = mock_process
+        updater.cancel()
+        mock_process.terminate.assert_called_once()
+
+    def test_cancel_handles_no_current_process(self, updater_module):
+        """Test cancel handles case when no process is running."""
+        FreshclamUpdater = updater_module["FreshclamUpdater"]
+        updater = FreshclamUpdater(log_manager=MagicMock())
+        updater._current_process = None
+        # Should not raise an error
+        updater.cancel()
+        assert updater._update_cancelled is True
+
+    def test_cancel_handles_oserror(self, updater_module):
+        """Test cancel handles OSError when terminating process."""
+        FreshclamUpdater = updater_module["FreshclamUpdater"]
+        updater = FreshclamUpdater(log_manager=MagicMock())
+        mock_process = MagicMock()
+        mock_process.terminate.side_effect = OSError("Process already terminated")
+        updater._current_process = mock_process
+        # Should not raise an error
+        updater.cancel()
+        assert updater._update_cancelled is True
+
+
+# =============================================================================
+# FreshclamUpdater.update_async() Tests
+# =============================================================================
+
+
+class TestFreshclamUpdaterUpdateAsync:
+    """Tests for FreshclamUpdater.update_async()."""
+
+    def test_callback_invoked_on_completion(self, updater_module):
+        """Test callback is invoked when update completes."""
+        FreshclamUpdater = updater_module["FreshclamUpdater"]
+        mock_glib = updater_module["glib"]
+        mock_log_manager = MagicMock()
+        mock_callback = MagicMock()
+
+        with patch("src.core.updater.GLib", mock_glib):
+            with patch("src.core.updater.check_freshclam_installed", return_value=(True, "1.0.0")):
+                with patch("src.core.updater.get_freshclam_path", return_value="freshclam"):
+                    with patch("src.core.updater.get_pkexec_path", return_value=None):
+                        with patch("src.core.updater.wrap_host_command", side_effect=lambda x: x):
+                            with patch("subprocess.Popen") as mock_popen:
+                                mock_process = MagicMock()
+                                mock_process.communicate.return_value = ("database is up-to-date", "")
+                                mock_process.returncode = 0
+                                mock_process.kill = MagicMock()
+                                mock_process.wait = MagicMock()
+                                mock_popen.return_value = mock_process
+
+                                updater = FreshclamUpdater(log_manager=mock_log_manager)
+                                updater.update_async(mock_callback)
+
+                                # Wait for thread to complete
+                                import time
+
+                                time.sleep(0.2)
+
+                                # Verify callback was called via GLib.idle_add
+                                mock_callback.assert_called_once()
+
+
+# =============================================================================
+# FreshclamUpdater._save_update_log() Tests
+# =============================================================================
+
+
+class TestFreshclamUpdaterSaveUpdateLog:
+    """Tests for FreshclamUpdater._save_update_log()."""
+
+    def test_log_entry_created_for_success(self, updater_module):
+        """Test log entry created with correct summary for SUCCESS."""
+        FreshclamUpdater = updater_module["FreshclamUpdater"]
+        UpdateResult = updater_module["UpdateResult"]
+        UpdateStatus = updater_module["UpdateStatus"]
+        mock_log_manager = MagicMock()
+        updater = FreshclamUpdater(log_manager=mock_log_manager)
+
+        result = UpdateResult(
+            status=UpdateStatus.SUCCESS,
+            stdout="Updated successfully",
+            stderr="",
+            exit_code=0,
+            databases_updated=2,
+            error_message=None,
+        )
+
+        updater._save_update_log(result, 5.0)
+
+        mock_log_manager.save_log.assert_called_once()
+        call_args = mock_log_manager.save_log.call_args
+        log_entry = call_args[0][0]
+        assert "2 database(s) updated" in log_entry.summary
+
+    def test_log_entry_created_for_up_to_date(self, updater_module):
+        """Test log entry created with correct summary for UP_TO_DATE."""
+        FreshclamUpdater = updater_module["FreshclamUpdater"]
+        UpdateResult = updater_module["UpdateResult"]
+        UpdateStatus = updater_module["UpdateStatus"]
+        mock_log_manager = MagicMock()
+        updater = FreshclamUpdater(log_manager=mock_log_manager)
+
+        result = UpdateResult(
+            status=UpdateStatus.UP_TO_DATE,
+            stdout="Already up to date",
+            stderr="",
+            exit_code=0,
+            databases_updated=0,
+            error_message=None,
+        )
+
+        updater._save_update_log(result, 3.0)
+
+        mock_log_manager.save_log.assert_called_once()
+        call_args = mock_log_manager.save_log.call_args
+        log_entry = call_args[0][0]
+        assert "up to date" in log_entry.summary.lower()
+
+    def test_log_entry_created_for_cancelled(self, updater_module):
+        """Test log entry created with correct summary for CANCELLED."""
+        FreshclamUpdater = updater_module["FreshclamUpdater"]
+        UpdateResult = updater_module["UpdateResult"]
+        UpdateStatus = updater_module["UpdateStatus"]
+        mock_log_manager = MagicMock()
+        updater = FreshclamUpdater(log_manager=mock_log_manager)
+
+        result = UpdateResult(
+            status=UpdateStatus.CANCELLED,
+            stdout="",
+            stderr="",
+            exit_code=0,
+            databases_updated=0,
+            error_message="Cancelled by user",
+        )
+
+        updater._save_update_log(result, 1.0)
+
+        mock_log_manager.save_log.assert_called_once()
+        call_args = mock_log_manager.save_log.call_args
+        log_entry = call_args[0][0]
+        assert "cancelled" in log_entry.summary.lower()
+
+    def test_log_entry_created_for_error(self, updater_module):
+        """Test log entry created with correct summary for ERROR."""
+        FreshclamUpdater = updater_module["FreshclamUpdater"]
+        UpdateResult = updater_module["UpdateResult"]
+        UpdateStatus = updater_module["UpdateStatus"]
+        mock_log_manager = MagicMock()
+        updater = FreshclamUpdater(log_manager=mock_log_manager)
+
+        result = UpdateResult(
+            status=UpdateStatus.ERROR,
+            stdout="",
+            stderr="Connection failed",
+            exit_code=1,
+            databases_updated=0,
+            error_message="Connection failed",
+        )
+
+        updater._save_update_log(result, 2.0)
+
+        mock_log_manager.save_log.assert_called_once()
+        call_args = mock_log_manager.save_log.call_args
+        log_entry = call_args[0][0]
+        assert "failed" in log_entry.summary.lower()
+
+    def test_log_entry_type_is_update(self, updater_module):
+        """Test log entry has type 'update'."""
+        FreshclamUpdater = updater_module["FreshclamUpdater"]
+        UpdateResult = updater_module["UpdateResult"]
+        UpdateStatus = updater_module["UpdateStatus"]
+        mock_log_manager = MagicMock()
+        updater = FreshclamUpdater(log_manager=mock_log_manager)
+
+        result = UpdateResult(
+            status=UpdateStatus.SUCCESS,
+            stdout="",
+            stderr="",
+            exit_code=0,
+            databases_updated=1,
+            error_message=None,
+        )
+
+        updater._save_update_log(result, 1.0)
+
+        call_args = mock_log_manager.save_log.call_args
+        log_entry = call_args[0][0]
+        # LogEntry uses 'type' not 'log_type' as the attribute
+        assert log_entry.type == "update"
