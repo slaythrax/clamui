@@ -69,12 +69,20 @@
   ],
   "qa_signoff": {
     "status": "fixes_applied",
-    "timestamp": "2026-01-05T15:30:00.000Z",
-    "fix_session": 0,
+    "timestamp": "2026-01-05T16:00:00.000Z",
+    "fix_session": 1,
     "issues_fixed": [
       {
         "title": "Empty yellow lock field on Save & Apply preference page",
         "fix_commit": "8f9ba9e"
+      },
+      {
+        "title": "Fix Gtk markup warnings - Unescaped ampersands",
+        "fix_commit": "c1427b0"
+      },
+      {
+        "title": "Move Auto Saved Settings info to Current Status field",
+        "fix_commit": "c1427b0"
       }
     ],
     "ready_for_qa_revalidation": true
