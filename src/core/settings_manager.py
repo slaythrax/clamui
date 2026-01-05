@@ -85,18 +85,41 @@ class SettingsManager:
 
     def save(self) -> bool:
         """
-        Save settings to file.
+        Save settings to file using atomic write.
+
+        Uses a temporary file and rename pattern to prevent
+        corruption during write operations.
 
         Returns:
             True if saved successfully, False otherwise
         """
         with self._lock:
             try:
+                # Ensure parent directory exists
                 self._config_dir.mkdir(parents=True, exist_ok=True)
-                with open(self._settings_file, "w", encoding="utf-8") as f:
-                    json.dump(self._settings, f, indent=2)
-                return True
-            except (OSError, PermissionError):
+
+                # Atomic write using temp file + rename
+                fd, temp_path = tempfile.mkstemp(
+                    suffix=".json",
+                    prefix="settings_",
+                    dir=self._config_dir,
+                )
+                try:
+                    with os.fdopen(fd, "w", encoding="utf-8") as f:
+                        json.dump(self._settings, f, indent=2)
+
+                    # Atomic rename
+                    temp_path_obj = Path(temp_path)
+                    temp_path_obj.replace(self._settings_file)
+                    return True
+                except Exception:
+                    # Clean up temp file on failure
+                    with contextlib.suppress(OSError):
+                        Path(temp_path).unlink(missing_ok=True)
+                    raise
+
+            except Exception:
+                # Catch all exceptions (including OSError, PermissionError)
                 return False
 
     def get(self, key: str, default: Any = None) -> Any:
