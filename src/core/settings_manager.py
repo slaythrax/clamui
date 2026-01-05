@@ -78,8 +78,11 @@ class SettingsManager:
                         loaded = json.load(f)
                         # Merge with defaults to ensure all keys exist
                         return {**self.DEFAULT_SETTINGS, **loaded}
-            except (json.JSONDecodeError, OSError, PermissionError):
-                # Handle corrupted files or permission issues silently
+            except json.JSONDecodeError:
+                # Handle corrupted files - backup for debugging
+                self._backup_corrupted_file()
+            except (OSError, PermissionError):
+                # Handle permission issues silently
                 pass
             return dict(self.DEFAULT_SETTINGS)
 
