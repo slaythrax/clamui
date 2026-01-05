@@ -121,7 +121,7 @@ class PreferencesWindow(Adw.PreferencesWindow, PreferencesPageMixin):
 
         # Create On-Access Scanning page (clamd.conf on-access settings)
         onaccess_page = OnAccessPage.create_page(
-            self._clamd_conf_path, self._onaccess_widgets, self._clamd_available
+            self._clamd_conf_path, self._onaccess_widgets, self._clamd_available, self
         )
         self.add(onaccess_page)
 
