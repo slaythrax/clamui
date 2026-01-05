@@ -425,6 +425,7 @@ class TestPreferencesWindowPageComposition:
             "/etc/clamav/clamd.conf",
             window._onaccess_widgets,
             window._clamd_available,
+            window,
         )
 
     def test_window_creates_scheduled_page(
