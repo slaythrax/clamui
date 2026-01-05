@@ -1172,6 +1172,150 @@ class TestSettingsManagerAtomicWrite:
         assert result is False
 
 
+class TestSettingsManagerBackupCorruptedFile:
+    """Tests for SettingsManager _backup_corrupted_file method and backup behavior."""
+
+    @pytest.fixture
+    def temp_config_dir(self):
+        """Create a temporary directory for settings storage."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            yield tmpdir
+
+    def test_backup_creates_corrupted_suffix_file(self, temp_config_dir):
+        """Test that backup creates file with .corrupted suffix."""
+        config_dir = Path(temp_config_dir)
+        config_dir.mkdir(parents=True, exist_ok=True)
+        settings_file = config_dir / "settings.json"
+        settings_file.write_text("corrupted data")
+
+        manager = SettingsManager(config_dir=config_dir)
+        manager._backup_corrupted_file()
+
+        backup_path = config_dir / "settings.json.corrupted"
+        assert backup_path.exists()
+        assert not settings_file.exists()
+
+    def test_backup_does_nothing_if_file_missing(self, temp_config_dir):
+        """Test that backup does nothing if file doesn't exist."""
+        config_dir = Path(temp_config_dir)
+        manager = SettingsManager(config_dir=config_dir)
+
+        # Should not raise
+        manager._backup_corrupted_file()
+
+        backup_path = config_dir / "settings.json.corrupted"
+        assert not backup_path.exists()
+
+    def test_backup_does_not_overwrite_existing_backup(self, temp_config_dir):
+        """Test that backup doesn't overwrite existing backup file."""
+        config_dir = Path(temp_config_dir)
+        config_dir.mkdir(parents=True, exist_ok=True)
+        settings_file = config_dir / "settings.json"
+        backup_path = config_dir / "settings.json.corrupted"
+
+        # Create existing backup
+        backup_path.write_text("original backup")
+        settings_file.write_text("new corrupted data")
+
+        manager = SettingsManager(config_dir=config_dir)
+        manager._backup_corrupted_file()
+
+        # Original backup should be preserved
+        assert backup_path.read_text() == "original backup"
+        # Original file should still exist
+        assert settings_file.exists()
+
+    def test_backup_handles_permission_error(self, temp_config_dir):
+        """Test that backup handles permission errors silently."""
+        config_dir = Path(temp_config_dir)
+        config_dir.mkdir(parents=True, exist_ok=True)
+        settings_file = config_dir / "settings.json"
+        settings_file.write_text("corrupted")
+
+        manager = SettingsManager(config_dir=config_dir)
+
+        with mock.patch.object(Path, "rename", side_effect=PermissionError):
+            # Should not raise
+            manager._backup_corrupted_file()
+
+    def test_backup_handles_os_error(self, temp_config_dir):
+        """Test that backup handles OS errors silently."""
+        config_dir = Path(temp_config_dir)
+        config_dir.mkdir(parents=True, exist_ok=True)
+        settings_file = config_dir / "settings.json"
+        settings_file.write_text("corrupted")
+
+        manager = SettingsManager(config_dir=config_dir)
+
+        with mock.patch.object(Path, "rename", side_effect=OSError):
+            # Should not raise
+            manager._backup_corrupted_file()
+
+    def test_load_creates_backup_on_corrupted_json(self, temp_config_dir):
+        """Test that load creates backup of corrupted JSON file."""
+        config_dir = Path(temp_config_dir)
+        config_dir.mkdir(parents=True, exist_ok=True)
+        settings_file = config_dir / "settings.json"
+        settings_file.write_text("{ corrupted json }")
+
+        manager = SettingsManager(config_dir=config_dir)
+
+        # Verify backup was created
+        backup_path = config_dir / "settings.json.corrupted"
+        assert backup_path.exists()
+
+        # Verify defaults are returned
+        assert manager.get("notifications_enabled") is True
+
+    def test_load_creates_backup_on_non_dict_json(self, temp_config_dir):
+        """Test that load creates backup when JSON contains non-dict data."""
+        config_dir = Path(temp_config_dir)
+        config_dir.mkdir(parents=True, exist_ok=True)
+        settings_file = config_dir / "settings.json"
+        # Write a JSON array instead of dict
+        settings_file.write_text('["item1", "item2"]')
+
+        manager = SettingsManager(config_dir=config_dir)
+
+        # Verify backup was created
+        backup_path = config_dir / "settings.json.corrupted"
+        assert backup_path.exists()
+
+        # Verify defaults are returned
+        assert manager.get("notifications_enabled") is True
+        assert manager.get("custom_setting") is None
+
+    def test_load_creates_backup_on_null_json(self, temp_config_dir):
+        """Test that load creates backup when JSON contains null."""
+        config_dir = Path(temp_config_dir)
+        config_dir.mkdir(parents=True, exist_ok=True)
+        settings_file = config_dir / "settings.json"
+        settings_file.write_text("null")
+
+        manager = SettingsManager(config_dir=config_dir)
+
+        # Verify backup was created
+        backup_path = config_dir / "settings.json.corrupted"
+        assert backup_path.exists()
+
+        # Verify defaults are returned
+        assert manager.get("notifications_enabled") is True
+
+    def test_backup_preserves_corrupted_content(self, temp_config_dir):
+        """Test that backup preserves the original corrupted content."""
+        config_dir = Path(temp_config_dir)
+        config_dir.mkdir(parents=True, exist_ok=True)
+        settings_file = config_dir / "settings.json"
+        corrupted_content = "{ invalid: json, content }"
+        settings_file.write_text(corrupted_content)
+
+        manager = SettingsManager(config_dir=config_dir)
+
+        # Verify backup contains original corrupted content
+        backup_path = config_dir / "settings.json.corrupted"
+        assert backup_path.read_text() == corrupted_content
+
+
 class TestSettingsManagerConcurrencyEdgeCases:
     """Edge case tests for concurrent access to SettingsManager."""
 
