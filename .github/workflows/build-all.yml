@@ -1,0 +1,11 @@
+name: Build All Packages
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-deb:
+    uses: ./.github/workflows/build-deb.yml
+
+  build-flatpak:
+    uses: ./.github/workflows/build-flatpak.yml

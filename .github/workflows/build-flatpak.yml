@@ -6,6 +6,8 @@ on:
     tags: ['v*']
   pull_request:
     branches: [main]
+  workflow_dispatch:
+  workflow_call:
 
 jobs:
   build-flatpak:
@@ -20,7 +22,7 @@ jobs:
       - name: Build Flatpak
         uses: flatpak/flatpak-github-actions/flatpak-builder@v6
         with:
-          manifest-path: com.github.rooki.ClamUI.yml
+          manifest-path: com.github.rooki.clamui.yml
           bundle: clamui.flatpak
           cache-key: flatpak-builder-${{ github.sha }}
 
