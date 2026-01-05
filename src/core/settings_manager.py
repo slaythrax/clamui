@@ -4,8 +4,10 @@ Settings manager module for ClamUI providing user preferences storage.
 Stores user settings in JSON format following XDG conventions.
 """
 
+import contextlib
 import json
 import os
+import tempfile
 import threading
 from pathlib import Path
 from typing import Any
@@ -74,28 +76,78 @@ class SettingsManager:
                 if self._settings_file.exists():
                     with open(self._settings_file, encoding="utf-8") as f:
                         loaded = json.load(f)
+                        # Verify loaded data is a dict
+                        if not isinstance(loaded, dict):
+                            # Non-dict JSON (arrays, null, primitives) is invalid
+                            self._backup_corrupted_file()
+                            return dict(self.DEFAULT_SETTINGS)
                         # Merge with defaults to ensure all keys exist
                         return {**self.DEFAULT_SETTINGS, **loaded}
-            except (json.JSONDecodeError, OSError, PermissionError):
-                # Handle corrupted files or permission issues silently
+            except json.JSONDecodeError:
+                # Handle corrupted files - backup for debugging
+                self._backup_corrupted_file()
+            except (OSError, PermissionError):
+                # Handle permission issues silently
                 pass
             return dict(self.DEFAULT_SETTINGS)
 
     def save(self) -> bool:
         """
-        Save settings to file.
+        Save settings to file using atomic write.
+
+        Uses a temporary file and rename pattern to prevent
+        corruption during write operations.
 
         Returns:
             True if saved successfully, False otherwise
         """
         with self._lock:
             try:
+                # Ensure parent directory exists
                 self._config_dir.mkdir(parents=True, exist_ok=True)
-                with open(self._settings_file, "w", encoding="utf-8") as f:
-                    json.dump(self._settings, f, indent=2)
-                return True
-            except (OSError, PermissionError):
+
+                # Atomic write using temp file + rename
+                fd, temp_path = tempfile.mkstemp(
+                    suffix=".json",
+                    prefix="settings_",
+                    dir=self._config_dir,
+                )
+                try:
+                    with os.fdopen(fd, "w", encoding="utf-8") as f:
+                        json.dump(self._settings, f, indent=2)
+
+                    # Atomic rename
+                    temp_path_obj = Path(temp_path)
+                    temp_path_obj.replace(self._settings_file)
+                    return True
+                except Exception:
+                    # Clean up temp file on failure
+                    with contextlib.suppress(OSError):
+                        Path(temp_path).unlink(missing_ok=True)
+                    raise
+
+            except Exception:
+                # Catch all exceptions (including OSError, PermissionError)
                 return False
+
+    def _backup_corrupted_file(self) -> None:
+        """
+        Create a backup of a corrupted settings file.
+
+        Renames the corrupted file with a .corrupted suffix
+        to preserve it for debugging purposes.
+        """
+        try:
+            if self._settings_file.exists():
+                backup_path = self._settings_file.with_suffix(
+                    f"{self._settings_file.suffix}.corrupted"
+                )
+                # Don't overwrite existing backups
+                if not backup_path.exists():
+                    self._settings_file.rename(backup_path)
+        except (OSError, PermissionError):
+            # Silently fail - backup is best effort
+            pass
 
     def get(self, key: str, default: Any = None) -> Any:
         """

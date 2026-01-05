@@ -674,12 +674,8 @@ class PreferencesWindow(Adw.PreferencesWindow):
         from src.core.utils import check_clamd_connection
 
         group = Adw.PreferencesGroup()
-        group.set_title("Scan Backend")
-        group.set_description(
-            "Choose how ClamUI communicates with ClamAV to perform virus scans. "
-            "The backend affects scan speed, memory usage, and setup requirements. "
-            "Auto mode (recommended) intelligently selects the best available backend."
-        )
+        group.set_title("Scan Backend (Auto-Saved)")
+        group.set_description("Select how ClamUI performs scans. Auto-saved.")
 
         # Scan backend dropdown
         backend_row = Adw.ComboRow()
@@ -711,15 +707,11 @@ class PreferencesWindow(Adw.PreferencesWindow):
         # Check daemon connection
         is_connected, message = check_clamd_connection()
         if is_connected:
-            status_row.set_subtitle(
-                "✓ Daemon is running and accessible — Auto mode will use daemon for faster scans"
-            )
+            status_row.set_subtitle("✓ Daemon available")
             status_icon = Gtk.Image.new_from_icon_name("emblem-ok-symbolic")
             status_icon.add_css_class("success")
         else:
-            status_row.set_subtitle(
-                f"⚠ Daemon not available ({message}) — Auto mode will use clamscan backend"
-            )
+            status_row.set_subtitle(f"⚠ Not available: {message}")
             status_icon = Gtk.Image.new_from_icon_name("dialog-warning-symbolic")
             status_icon.add_css_class("warning")
 
@@ -737,8 +729,8 @@ class PreferencesWindow(Adw.PreferencesWindow):
 
         # Learn more row - links to documentation
         learn_more_row = Adw.ActionRow()
-        learn_more_row.set_title("Learn More")
-        learn_more_row.set_subtitle("View detailed documentation about scan backends")
+        learn_more_row.set_title("Documentation")
+        learn_more_row.set_subtitle("About scan backends")
         add_row_icon(learn_more_row, "help-about-symbolic")
         learn_more_row.set_activatable(True)
         learn_more_row.connect("activated", self._on_learn_more_clicked)
@@ -785,9 +777,7 @@ class PreferencesWindow(Adw.PreferencesWindow):
 
         # Update status row
         if is_connected:
-            self._daemon_status_row.set_subtitle(
-                "✓ Daemon is running and accessible — Auto mode will use daemon for faster scans"
-            )
+            self._daemon_status_row.set_subtitle("✓ Daemon available")
             # Update icon
             for child in list(self._daemon_status_row):
                 if isinstance(child, Gtk.Image):
@@ -796,9 +786,7 @@ class PreferencesWindow(Adw.PreferencesWindow):
                     child.add_css_class("success")
                     break
         else:
-            self._daemon_status_row.set_subtitle(
-                f"⚠ Daemon not available ({message}) — Auto mode will use clamscan backend"
-            )
+            self._daemon_status_row.set_subtitle(f"⚠ Not available: {message}")
             for child in list(self._daemon_status_row):
                 if isinstance(child, Gtk.Image):
                     child.set_from_icon_name("dialog-warning-symbolic")
@@ -902,10 +890,7 @@ class PreferencesWindow(Adw.PreferencesWindow):
         """
         group = Adw.PreferencesGroup()
         group.set_title("Monitored Paths")
-        group.set_description(
-            "Configure which directories to monitor for real-time scanning. "
-            "Use comma-separated paths for multiple entries."
-        )
+        group.set_description("Directories to monitor. Comma-separated.")
         group.set_header_suffix(self._create_permission_indicator())
 
         # OnAccessIncludePath row
@@ -949,7 +934,7 @@ class PreferencesWindow(Adw.PreferencesWindow):
         """
         group = Adw.PreferencesGroup()
         group.set_title("Behavior Settings")
-        group.set_description("Configure how On-Access scanning responds to file access events")
+        group.set_description("On-Access scanning behavior")
         group.set_header_suffix(self._create_permission_indicator())
 
         # OnAccessPrevention switch
@@ -997,7 +982,7 @@ class PreferencesWindow(Adw.PreferencesWindow):
         """
         group = Adw.PreferencesGroup()
         group.set_title("Performance Settings")
-        group.set_description("Configure On-Access scanning performance and limits")
+        group.set_description("Scanning limits and performance")
         group.set_header_suffix(self._create_permission_indicator())
 
         # OnAccessMaxThreads spin row (1-64)
@@ -1055,19 +1040,13 @@ class PreferencesWindow(Adw.PreferencesWindow):
         """
         group = Adw.PreferencesGroup()
         group.set_title("Scan Loop Prevention")
-        group.set_description(
-            "CRITICAL: At least one exclusion must be set to prevent infinite scan loops. "
-            "The scanner process must be excluded from triggering scans on its own file access."
-        )
+        group.set_description("CRITICAL: Set at least one to prevent infinite loops")
         group.set_header_suffix(self._create_permission_indicator())
 
         # Warning banner row
         warning_row = Adw.ActionRow()
         warning_row.set_title("⚠ Required Configuration")
-        warning_row.set_subtitle(
-            "Without exclusions, clamonacc will trigger scans on files it accesses, "
-            "causing an infinite loop. Set the clamav user or its UID."
-        )
+        warning_row.set_subtitle("Exclude clamav user or UID to prevent scan loops")
         warning_row.add_css_class("warning")
         # Add warning icon as prefix
         warning_icon = Gtk.Image.new_from_icon_name("dialog-warning-symbolic")
@@ -1121,7 +1100,7 @@ class PreferencesWindow(Adw.PreferencesWindow):
         # Scheduled scans enabled group
         group = Adw.PreferencesGroup()
         group.set_title("Scheduled Scans Configuration")
-        group.set_description("Configure automatic virus scanning")
+        group.set_description("Configure automatic scanning. Save with 'Save &amp; Apply'.")
 
         # Enable scheduled scans switch
         enable_scheduled_row = Adw.SwitchRow()
@@ -1215,8 +1194,8 @@ class PreferencesWindow(Adw.PreferencesWindow):
 
         # Preset exclusions group
         preset_group = Adw.PreferencesGroup()
-        preset_group.set_title("Preset Exclusions")
-        preset_group.set_description("Common directories and patterns to exclude from scanning")
+        preset_group.set_title("Preset Exclusions (Auto-Saved)")
+        preset_group.set_description("Common patterns to exclude. Auto-saved.")
 
         for preset in PRESET_EXCLUSIONS:
             # Create a row for each preset
@@ -1230,8 +1209,8 @@ class PreferencesWindow(Adw.PreferencesWindow):
 
         # Custom exclusions group
         self._custom_exclusions_group = Adw.PreferencesGroup()
-        self._custom_exclusions_group.set_title("Custom Exclusions")
-        self._custom_exclusions_group.set_description("Add your own exclusion patterns")
+        self._custom_exclusions_group.set_title("Custom Exclusions (Auto-Saved)")
+        self._custom_exclusions_group.set_description("Your exclusion patterns. Auto-saved.")
 
         # Custom exclusion entry row
         self._custom_entry_row = Adw.EntryRow()
@@ -1363,43 +1342,51 @@ class PreferencesWindow(Adw.PreferencesWindow):
         page.set_title("Save & Apply")
         page.set_icon_name("document-save-symbolic")
 
-        # Configuration status group
-        status_group = Adw.PreferencesGroup()
-        status_group.set_title("Configuration Status")
+        # Information banner explaining what needs to be saved
+        info_group = Adw.PreferencesGroup()
+        info_group.set_title("Save Behavior")
 
-        # Status indicator row
-        status_row = Adw.ActionRow()
-        status_row.set_title("Current Status")
-        status_row.set_subtitle("Ready")
+        # Auto-save settings info row
+        auto_save_row = Adw.ActionRow()
+        auto_save_row.set_title("✓ Auto-Saved")
+        auto_save_row.set_subtitle("Scan Backend, Exclusions — Saved automatically")
+        auto_save_icon = Gtk.Image.new_from_icon_name("emblem-default-symbolic")
+        auto_save_icon.add_css_class("success")
+        auto_save_row.add_prefix(auto_save_icon)
+        info_group.add(auto_save_row)
 
-        # Status indicator widget
-        status_indicator = Gtk.Image.new_from_icon_name("emblem-ok-symbolic")
-        status_indicator.add_css_class("success")
-        status_row.add_suffix(status_indicator)
+        # Manual save settings info row
+        manual_save_row = Adw.ActionRow()
+        manual_save_row.set_title("🔒 Requires Save &amp; Apply")
+        manual_save_row.set_subtitle(
+            "Database Updates, Scanner, On-Access, Scheduled Scans"
+        )
+        lock_icon = Gtk.Image.new_from_icon_name("system-lock-screen-symbolic")
+        lock_icon.add_css_class("warning")
+        manual_save_row.add_prefix(lock_icon)
+        info_group.add(manual_save_row)
 
-        status_group.add(status_row)
-        page.add(status_group)
+        page.add(info_group)
 
         # Save & apply button group
         button_group = Adw.PreferencesGroup()
-        button_group.set_title("Apply Changes")
-        button_group.set_description("Save configuration changes to ClamAV")
+        button_group.set_title("Apply Configuration")
 
-        # Save button
-        save_button_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
-        save_button_row.set_margin_top(12)
-        save_button_row.set_margin_bottom(12)
-        save_button_row.set_margin_start(12)
-        save_button_row.set_margin_end(12)
+        # Save button row - using ActionRow to properly contain the button
+        save_action_row = Adw.ActionRow()
+        save_action_row.set_title("Save Configuration")
 
+        # Create the save button
         save_button = Gtk.Button()
         save_button.set_label("Save & Apply")
         save_button.add_css_class("suggested-action")
-        save_button.set_hexpand(True)
+        save_button.set_valign(Gtk.Align.CENTER)
         save_button.connect("clicked", self._on_save_clicked)
-        save_button_row.append(save_button)
 
-        button_group.add(save_button_row)
+        # Add button as suffix to the row
+        save_action_row.add_suffix(save_button)
+
+        button_group.add(save_action_row)
         page.add(button_group)
 
         self.add(page)

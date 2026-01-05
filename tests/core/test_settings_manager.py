@@ -707,10 +707,10 @@ class TestSettingsManagerLoadEdgeCases:
             yield tmpdir
 
     def test_load_handles_non_dict_json(self, temp_config_dir):
-        """Test that load raises TypeError for JSON file containing non-dict data.
+        """Test that load handles JSON file containing non-dict data gracefully.
 
-        Note: The current implementation doesn't gracefully handle non-dict JSON.
-        This test documents the current behavior where a TypeError is raised.
+        Non-dict JSON (arrays, primitives) is treated as corrupted and backed up,
+        with defaults returned instead of raising TypeError.
         """
         config_dir = Path(temp_config_dir)
         config_dir.mkdir(parents=True, exist_ok=True)
@@ -718,24 +718,34 @@ class TestSettingsManagerLoadEdgeCases:
         # Write a JSON array instead of dict
         settings_file.write_text('["item1", "item2"]')
 
-        # Current implementation raises TypeError when trying to merge non-dict
-        with pytest.raises(TypeError):
-            SettingsManager(config_dir=config_dir)
+        # Should handle gracefully by backing up and returning defaults
+        manager = SettingsManager(config_dir=config_dir)
+        assert manager.get("notifications_enabled") is True
+
+        # Verify backup was created
+        backup_path = config_dir / "settings.json.corrupted"
+        assert backup_path.exists()
+        assert backup_path.read_text() == '["item1", "item2"]'
 
     def test_load_handles_null_json(self, temp_config_dir):
-        """Test that load raises TypeError for JSON file containing null.
+        """Test that load handles JSON file containing null gracefully.
 
-        Note: The current implementation doesn't gracefully handle null JSON.
-        This test documents the current behavior where a TypeError is raised.
+        Null JSON is treated as corrupted and backed up, with defaults returned
+        instead of raising TypeError.
         """
         config_dir = Path(temp_config_dir)
         config_dir.mkdir(parents=True, exist_ok=True)
         settings_file = config_dir / "settings.json"
         settings_file.write_text("null")
 
-        # Current implementation raises TypeError when trying to merge None
-        with pytest.raises(TypeError):
-            SettingsManager(config_dir=config_dir)
+        # Should handle gracefully by backing up and returning defaults
+        manager = SettingsManager(config_dir=config_dir)
+        assert manager.get("notifications_enabled") is True
+
+        # Verify backup was created
+        backup_path = config_dir / "settings.json.corrupted"
+        assert backup_path.exists()
+        assert backup_path.read_text() == "null"
 
     def test_load_handles_json_with_unicode(self, temp_config_dir):
         """Test that load handles JSON with unicode characters."""
@@ -1047,6 +1057,273 @@ class TestSettingsManagerMalformedExclusionEdgeCases:
 
         # Should return None (the stored value)
         assert patterns is None
+
+
+class TestSettingsManagerAtomicWrite:
+    """Tests for atomic write behavior in SettingsManager."""
+
+    @pytest.fixture
+    def temp_config_dir(self):
+        """Create a temporary directory for settings storage."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            yield tmpdir
+
+    @pytest.fixture
+    def settings_manager(self, temp_config_dir):
+        """Create a SettingsManager with a temporary directory."""
+        return SettingsManager(config_dir=temp_config_dir)
+
+    def test_save_uses_atomic_write(self, settings_manager):
+        """Test that save uses atomic write pattern (temp file + rename)."""
+        with (
+            mock.patch("tempfile.mkstemp") as mock_mkstemp,
+            mock.patch("os.fdopen") as mock_fdopen,
+            mock.patch.object(Path, "replace") as mock_replace,
+            mock.patch.object(Path, "mkdir"),
+        ):
+            # Setup mocks
+            mock_mkstemp.return_value = (1, "/tmp/settings_test.json")
+            mock_file = mock.MagicMock()
+            mock_file.__enter__ = mock.MagicMock(return_value=mock_file)
+            mock_file.__exit__ = mock.MagicMock(return_value=False)
+            mock_fdopen.return_value = mock_file
+
+            # Perform save
+            result = settings_manager.save()
+
+            # Verify atomic write pattern was used
+            assert result is True
+            mock_mkstemp.assert_called_once()
+            mock_fdopen.assert_called_once()
+            mock_replace.assert_called_once()
+
+    def test_save_cleans_up_temp_file_on_failure(self, temp_config_dir):
+        """Test that save cleans up temp file if write fails."""
+        settings_manager = SettingsManager(config_dir=temp_config_dir)
+
+        # Mock json.dump to fail during write
+        with mock.patch("json.dump", side_effect=Exception("Write error")):
+            result = settings_manager.save()
+
+        assert result is False
+        # Verify no temp files are left behind
+        temp_files = list(Path(temp_config_dir).glob("settings_*.json"))
+        assert len(temp_files) == 0
+
+    def test_save_preserves_original_on_failure(self, temp_config_dir):
+        """Test that original file is not corrupted if save fails mid-write."""
+        settings_manager = SettingsManager(config_dir=temp_config_dir)
+
+        # Save initial data
+        settings_manager.set("test_key", "original_value")
+        settings_file = Path(temp_config_dir) / "settings.json"
+        assert settings_file.exists()
+
+        # Read original content
+        original_content = settings_file.read_text()
+
+        # Mock to fail during atomic rename (after temp file is written)
+        with mock.patch.object(Path, "replace", side_effect=OSError("Rename failed")):
+            result = settings_manager.set("test_key", "corrupted_value")
+
+        # Verify save failed
+        assert result is False
+
+        # Verify original file is preserved and not corrupted
+        assert settings_file.exists()
+        current_content = settings_file.read_text()
+        assert current_content == original_content
+
+        # Verify original value is still readable
+        manager2 = SettingsManager(config_dir=temp_config_dir)
+        assert manager2.get("test_key") == "original_value"
+
+    def test_save_creates_temp_file_in_same_directory(self, temp_config_dir):
+        """Test that temp file is created in the same directory as settings file."""
+        settings_manager = SettingsManager(config_dir=temp_config_dir)
+
+        with mock.patch("tempfile.mkstemp") as mock_mkstemp:
+            # Setup mock to return a temp file path
+            mock_mkstemp.return_value = (
+                mock.MagicMock(),
+                str(Path(temp_config_dir) / "settings_temp.json"),
+            )
+            with (
+                mock.patch("os.fdopen"),
+                mock.patch.object(Path, "replace"),
+                mock.patch.object(Path, "unlink"),
+            ):
+                # Trigger exception to test cleanup
+                with mock.patch("json.dump", side_effect=Exception()):
+                    settings_manager.save()
+
+            # Verify mkstemp was called with the correct directory
+            call_kwargs = mock_mkstemp.call_args[1]
+            assert call_kwargs["dir"] == Path(temp_config_dir)
+            assert call_kwargs["prefix"] == "settings_"
+            assert call_kwargs["suffix"] == ".json"
+
+    def test_save_handles_mkdir_failure(self, temp_config_dir):
+        """Test that save handles directory creation failures gracefully."""
+        settings_manager = SettingsManager(config_dir=temp_config_dir)
+
+        with mock.patch.object(Path, "mkdir", side_effect=PermissionError("Cannot create dir")):
+            result = settings_manager.save()
+
+        assert result is False
+
+    def test_save_handles_mkstemp_failure(self, temp_config_dir):
+        """Test that save handles temp file creation failures gracefully."""
+        settings_manager = SettingsManager(config_dir=temp_config_dir)
+
+        with mock.patch("tempfile.mkstemp", side_effect=OSError("Cannot create temp file")):
+            result = settings_manager.save()
+
+        assert result is False
+
+
+class TestSettingsManagerBackupCorruptedFile:
+    """Tests for SettingsManager _backup_corrupted_file method and backup behavior."""
+
+    @pytest.fixture
+    def temp_config_dir(self):
+        """Create a temporary directory for settings storage."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            yield tmpdir
+
+    def test_backup_creates_corrupted_suffix_file(self, temp_config_dir):
+        """Test that backup creates file with .corrupted suffix."""
+        config_dir = Path(temp_config_dir)
+        config_dir.mkdir(parents=True, exist_ok=True)
+        settings_file = config_dir / "settings.json"
+        settings_file.write_text("corrupted data")
+
+        manager = SettingsManager(config_dir=config_dir)
+        manager._backup_corrupted_file()
+
+        backup_path = config_dir / "settings.json.corrupted"
+        assert backup_path.exists()
+        assert not settings_file.exists()
+
+    def test_backup_does_nothing_if_file_missing(self, temp_config_dir):
+        """Test that backup does nothing if file doesn't exist."""
+        config_dir = Path(temp_config_dir)
+        manager = SettingsManager(config_dir=config_dir)
+
+        # Should not raise
+        manager._backup_corrupted_file()
+
+        backup_path = config_dir / "settings.json.corrupted"
+        assert not backup_path.exists()
+
+    def test_backup_does_not_overwrite_existing_backup(self, temp_config_dir):
+        """Test that backup doesn't overwrite existing backup file."""
+        config_dir = Path(temp_config_dir)
+        config_dir.mkdir(parents=True, exist_ok=True)
+        settings_file = config_dir / "settings.json"
+        backup_path = config_dir / "settings.json.corrupted"
+
+        # Create existing backup
+        backup_path.write_text("original backup")
+        settings_file.write_text("new corrupted data")
+
+        manager = SettingsManager(config_dir=config_dir)
+        manager._backup_corrupted_file()
+
+        # Original backup should be preserved
+        assert backup_path.read_text() == "original backup"
+        # Original file should still exist
+        assert settings_file.exists()
+
+    def test_backup_handles_permission_error(self, temp_config_dir):
+        """Test that backup handles permission errors silently."""
+        config_dir = Path(temp_config_dir)
+        config_dir.mkdir(parents=True, exist_ok=True)
+        settings_file = config_dir / "settings.json"
+        settings_file.write_text("corrupted")
+
+        manager = SettingsManager(config_dir=config_dir)
+
+        with mock.patch.object(Path, "rename", side_effect=PermissionError):
+            # Should not raise
+            manager._backup_corrupted_file()
+
+    def test_backup_handles_os_error(self, temp_config_dir):
+        """Test that backup handles OS errors silently."""
+        config_dir = Path(temp_config_dir)
+        config_dir.mkdir(parents=True, exist_ok=True)
+        settings_file = config_dir / "settings.json"
+        settings_file.write_text("corrupted")
+
+        manager = SettingsManager(config_dir=config_dir)
+
+        with mock.patch.object(Path, "rename", side_effect=OSError):
+            # Should not raise
+            manager._backup_corrupted_file()
+
+    def test_load_creates_backup_on_corrupted_json(self, temp_config_dir):
+        """Test that load creates backup of corrupted JSON file."""
+        config_dir = Path(temp_config_dir)
+        config_dir.mkdir(parents=True, exist_ok=True)
+        settings_file = config_dir / "settings.json"
+        settings_file.write_text("{ corrupted json }")
+
+        manager = SettingsManager(config_dir=config_dir)
+
+        # Verify backup was created
+        backup_path = config_dir / "settings.json.corrupted"
+        assert backup_path.exists()
+
+        # Verify defaults are returned
+        assert manager.get("notifications_enabled") is True
+
+    def test_load_creates_backup_on_non_dict_json(self, temp_config_dir):
+        """Test that load creates backup when JSON contains non-dict data."""
+        config_dir = Path(temp_config_dir)
+        config_dir.mkdir(parents=True, exist_ok=True)
+        settings_file = config_dir / "settings.json"
+        # Write a JSON array instead of dict
+        settings_file.write_text('["item1", "item2"]')
+
+        manager = SettingsManager(config_dir=config_dir)
+
+        # Verify backup was created
+        backup_path = config_dir / "settings.json.corrupted"
+        assert backup_path.exists()
+
+        # Verify defaults are returned
+        assert manager.get("notifications_enabled") is True
+        assert manager.get("custom_setting") is None
+
+    def test_load_creates_backup_on_null_json(self, temp_config_dir):
+        """Test that load creates backup when JSON contains null."""
+        config_dir = Path(temp_config_dir)
+        config_dir.mkdir(parents=True, exist_ok=True)
+        settings_file = config_dir / "settings.json"
+        settings_file.write_text("null")
+
+        manager = SettingsManager(config_dir=config_dir)
+
+        # Verify backup was created
+        backup_path = config_dir / "settings.json.corrupted"
+        assert backup_path.exists()
+
+        # Verify defaults are returned
+        assert manager.get("notifications_enabled") is True
+
+    def test_backup_preserves_corrupted_content(self, temp_config_dir):
+        """Test that backup preserves the original corrupted content."""
+        config_dir = Path(temp_config_dir)
+        config_dir.mkdir(parents=True, exist_ok=True)
+        settings_file = config_dir / "settings.json"
+        corrupted_content = "{ invalid: json, content }"
+        settings_file.write_text(corrupted_content)
+
+        manager = SettingsManager(config_dir=config_dir)
+
+        # Verify backup contains original corrupted content
+        backup_path = config_dir / "settings.json.corrupted"
+        assert backup_path.read_text() == corrupted_content
 
 
 class TestSettingsManagerConcurrencyEdgeCases:
