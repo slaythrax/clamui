@@ -135,6 +135,42 @@ class TestTooltipFormatting:
             # Verify the scan button has tooltip with F5
             view._scan_button.set_tooltip_text.assert_any_call("Start Scan (F5)")
 
+    def test_update_button_tooltip(self, mock_gi_modules):
+        """Test that update button has tooltip with F6 keyboard shortcut."""
+        # Clear any cached imports
+        _clear_src_modules()
+
+        # Mock dependencies
+        mock_updater_module = mock.MagicMock()
+        mock_updater_module.FreshclamUpdater = mock.MagicMock()
+        mock_updater_module.UpdateResult = mock.MagicMock()
+        mock_updater_module.UpdateStatus = mock.MagicMock()
+
+        with mock.patch.dict(
+            sys.modules,
+            {
+                "src.core.updater": mock_updater_module,
+            },
+        ):
+            # Import UpdateView class
+            from src.ui.update_view import UpdateView
+
+            # Create instance without calling __init__
+            view = object.__new__(UpdateView)
+
+            # Mock required attributes
+            view._settings_manager = mock.MagicMock()
+            view._updater = mock.MagicMock()
+            view._update_button = mock.MagicMock()
+            view._update_spinner = mock.MagicMock()
+            view._cancel_button = mock.MagicMock()
+
+            # Call the method that creates update section
+            view._create_update_section()
+
+            # Verify the update button has tooltip with F6
+            view._update_button.set_tooltip_text.assert_any_call("Update Database (F6)")
+
     def test_tooltip_format_consistency(self, mock_gi_modules):
         """Test that all tooltips follow consistent format: 'Description (Shortcut)'."""
         # This test verifies the tooltip format pattern used across all buttons
