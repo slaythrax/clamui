@@ -76,6 +76,11 @@ class SettingsManager:
                 if self._settings_file.exists():
                     with open(self._settings_file, encoding="utf-8") as f:
                         loaded = json.load(f)
+                        # Verify loaded data is a dict
+                        if not isinstance(loaded, dict):
+                            # Non-dict JSON (arrays, null, primitives) is invalid
+                            self._backup_corrupted_file()
+                            return dict(self.DEFAULT_SETTINGS)
                         # Merge with defaults to ensure all keys exist
                         return {**self.DEFAULT_SETTINGS, **loaded}
             except json.JSONDecodeError:
