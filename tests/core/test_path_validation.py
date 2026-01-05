@@ -273,7 +273,7 @@ class TestValidatePath:
         with mock.patch.object(Path, "resolve", side_effect=RuntimeError("Symlink loop detected")):
             is_valid, error = validate_path("some/path")
             assert is_valid is False
-            assert "invalid path" in error.lower()
+            assert "symlink loop" in error.lower()
 
 
 class TestValidateDroppedFiles:

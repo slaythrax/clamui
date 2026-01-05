@@ -18,7 +18,6 @@ New code should import directly from the focused modules.
 """
 
 # Re-export all public functions from focused modules
-from .clipboard import copy_to_clipboard
 from .clamav_detection import (
     check_clamav_installed,
     check_clamd_connection,
@@ -28,6 +27,7 @@ from .clamav_detection import (
     get_clamd_socket_path,
     get_freshclam_path,
 )
+from .clipboard import copy_to_clipboard
 from .flatpak import (
     _resolve_portal_path_via_dbus,
     _resolve_portal_path_via_gio,

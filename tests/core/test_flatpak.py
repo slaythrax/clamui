@@ -461,7 +461,7 @@ class TestFormatFlatpakPortalPath:
             with mock.patch.object(flatpak, "_resolve_portal_path_via_gio", return_value=None):
                 with mock.patch.object(flatpak, "_resolve_portal_path_via_dbus", return_value=None):
                     result = flatpak.format_flatpak_portal_path(
-                        "/run/flatpak/doc/xyz789/Downloads/file.txt"
+                        "/run/flatpak/doc/def789/Downloads/file.txt"
                     )
                     assert result == "~/Downloads/file.txt"
 
@@ -473,24 +473,19 @@ class TestFormatFlatpakPortalPath:
 
     def test_format_flatpak_portal_path_with_dbus_resolution(self):
         """Test format_flatpak_portal_path uses D-Bus resolution as fallback."""
-        mock_gio = mock.MagicMock()
-        mock_glib = mock.MagicMock()
-        mock_bus = mock.MagicMock()
-        mock_result = mock.MagicMock()
-        mock_result.unpack.return_value = (b"/home/user/CustomFolder/file.txt\x00", {})
-
-        mock_gio.bus_get_sync.return_value = mock_bus
-        mock_bus.call_sync.return_value = mock_result
-
-        mock_gi_repository = mock.MagicMock()
-        mock_gi_repository.Gio = mock_gio
-        mock_gi_repository.GLib = mock_glib
-        with mock.patch.dict("sys.modules", {"gi.repository": mock_gi_repository}):
-            with mock.patch("src.core.flatpak.Path.home", return_value=Path("/home/user")):
-                result = flatpak.format_flatpak_portal_path(
-                    "/run/user/1000/doc/abc123/CustomFolder/file.txt"
-                )
-                assert result == "~/CustomFolder/file.txt"
+        # Mock resolution methods - D-Bus returns resolved path, others return None
+        with mock.patch.object(flatpak, "_resolve_portal_path_via_xattr", return_value=None):
+            with mock.patch.object(flatpak, "_resolve_portal_path_via_gio", return_value=None):
+                with mock.patch.object(
+                    flatpak,
+                    "_resolve_portal_path_via_dbus",
+                    return_value="/home/user/CustomFolder/file.txt",
+                ):
+                    with mock.patch("src.core.flatpak.Path.home", return_value=Path("/home/user")):
+                        result = flatpak.format_flatpak_portal_path(
+                            "/run/user/1000/doc/abc123/CustomFolder/file.txt"
+                        )
+                        assert result == "~/CustomFolder/file.txt"
 
     def test_format_flatpak_portal_path_fallback_to_portal_indicator(self):
         """Test format_flatpak_portal_path shows [Portal] when resolution fails."""
