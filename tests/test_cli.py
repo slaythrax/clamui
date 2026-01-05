@@ -27,21 +27,45 @@ def _clear_src_modules():
         del sys.modules[mod]
 
 
-@pytest.fixture
-def parse_file_arguments():
+# Cache for module-level function reference
+_cached_parse_file_arguments = None
+
+
+@pytest.fixture(scope="module")
+def parse_file_arguments(request):
     """Import parse_file_arguments with proper GTK mocking.
 
-    This fixture handles the complex mocking required to import src.main
-    without requiring GTK/GI runtime dependencies.
+    This fixture is module-scoped to avoid repeated imports that cause
+    numpy C extension reload errors.
     """
-    # Create comprehensive mocks
+    global _cached_parse_file_arguments
+    if _cached_parse_file_arguments is not None:
+        yield _cached_parse_file_arguments
+        return
+
+    # Create comprehensive mocks for GTK/GI
     mock_gi = mock.MagicMock()
     mock_gi.version_info = (3, 48, 0)
     mock_gi.require_version = mock.MagicMock()
 
-    mock_gi_repository = mock.MagicMock()
+    # Create proper mock classes for inheritance
+    class MockGtkWidget:
+        """Base mock class for GTK widgets."""
 
-    # Mock the matplotlib GTK backend to avoid metaclass conflicts
+        def __init__(self, *args, **kwargs):
+            pass
+
+    class MockAdwPreferencesWindow(MockGtkWidget):
+        """Mock for Adw.PreferencesWindow - a real class for inheritance."""
+
+        pass
+
+    mock_gi_repository = mock.MagicMock()
+    mock_gi_repository.Adw.PreferencesWindow = MockAdwPreferencesWindow
+    mock_gi_repository.Gtk.Widget = MockGtkWidget
+    mock_gi_repository.Gtk.Box = MockGtkWidget
+
+    # Mock the matplotlib GTK backend
     mock_backend = mock.MagicMock()
 
     # Store original modules
@@ -49,17 +73,12 @@ def parse_file_arguments():
     modules_to_mock = [
         "gi",
         "gi.repository",
+        "gi.repository.Adw",
+        "gi.repository.Gtk",
+        "gi.repository.Gio",
+        "gi.repository.GLib",
         "matplotlib.backends.backend_gtk4",
         "matplotlib.backends.backend_gtk4agg",
-        "src.ui.statistics_view",
-        "src.ui.window",
-        "src.ui.scan_view",
-        "src.ui.update_view",
-        "src.ui.logs_view",
-        "src.ui.components_view",
-        "src.ui.preferences",
-        "src.ui.fullscreen_dialog",
-        "src.app",
     ]
 
     for mod in modules_to_mock:
@@ -68,28 +87,34 @@ def parse_file_arguments():
     # Set up mocks
     sys.modules["gi"] = mock_gi
     sys.modules["gi.repository"] = mock_gi_repository
+    sys.modules["gi.repository.Adw"] = mock_gi_repository.Adw
+    sys.modules["gi.repository.Gtk"] = mock_gi_repository.Gtk
+    sys.modules["gi.repository.Gio"] = mock_gi_repository.Gio
+    sys.modules["gi.repository.GLib"] = mock_gi_repository.GLib
     sys.modules["matplotlib.backends.backend_gtk4"] = mock_backend
     sys.modules["matplotlib.backends.backend_gtk4agg"] = mock_backend
 
-    # Clear cached modules that might have been imported
-    for mod in list(sys.modules.keys()):
-        if mod.startswith("src."):
-            del sys.modules[mod]
+    # Clear any cached src modules from previous test files
+    _clear_src_modules()
 
     try:
         from src.main import parse_file_arguments as func
 
+        _cached_parse_file_arguments = func
         yield func
     finally:
-        # Restore original modules
-        for mod, original in original_modules.items():
-            if original is not None:
-                sys.modules[mod] = original
-            elif mod in sys.modules:
-                del sys.modules[mod]
+        # Only restore modules at end of module, not between tests
+        def cleanup():
+            global _cached_parse_file_arguments
+            _cached_parse_file_arguments = None
+            for mod, original in original_modules.items():
+                if original is not None:
+                    sys.modules[mod] = original
+                elif mod in sys.modules:
+                    del sys.modules[mod]
+            _clear_src_modules()
 
-        # Critical: Clear all src.* modules to prevent pollution
-        _clear_src_modules()
+        request.addfinalizer(cleanup)
 
 
 class TestParseFileArguments:

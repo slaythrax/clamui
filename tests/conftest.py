@@ -57,9 +57,21 @@ class MockGtkBox(MockGtkWidget):
 
 
 class MockAdwPreferencesWindow(MockGtkWidget):
-    """Mock for Adw.PreferencesWindow."""
+    """Mock for Adw.PreferencesWindow with tracked method calls."""
 
-    pass
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # Store mock methods in __dict__ to avoid __getattr__ recursion
+        object.__setattr__(self, "_mocks", {})
+
+    def __getattr__(self, name):
+        """Return a persistent MagicMock for method tracking."""
+        if name.startswith("_"):
+            raise AttributeError(name)
+        mocks = object.__getattribute__(self, "_mocks")
+        if name not in mocks:
+            mocks[name] = MagicMock()
+        return mocks[name]
 
 
 class MockAdwDialog(MockGtkWidget):
@@ -151,7 +163,26 @@ def mock_gi_modules():
     mock_adw.PreferencesWindow = MockAdwPreferencesWindow
     mock_adw.Dialog = MockAdwDialog
     mock_adw.ApplicationWindow = MockAdwApplicationWindow
-    mock_adw.ActionRow = MagicMock()  # ActionRow instance - tests can set return_value
+
+    # Widget row constructors return unique MagicMock instances to track calls separately
+    # ActionRow is kept without side_effect since tests may set return_value
+    mock_adw.ActionRow = MagicMock()
+    mock_adw.ComboRow = MagicMock(side_effect=lambda *args, **kwargs: MagicMock())
+    mock_adw.SwitchRow = MagicMock(side_effect=lambda *args, **kwargs: MagicMock())
+    mock_adw.EntryRow = MagicMock(side_effect=lambda *args, **kwargs: MagicMock())
+    mock_adw.SpinRow = MagicMock()
+    mock_adw.SpinRow.new_with_range = MagicMock(side_effect=lambda *args, **kwargs: MagicMock())
+    # Container widgets - tests may set return_value to control what's returned
+    mock_adw.PreferencesGroup = MagicMock()
+    mock_adw.PreferencesPage = MagicMock()
+    mock_adw.AlertDialog = MagicMock()
+
+    # GTK widget constructors - tests may set return_value
+    mock_gtk.Button = MagicMock()
+    mock_gtk.Image = MagicMock()
+    mock_gtk.Image.new_from_icon_name = MagicMock()
+    mock_gtk.StringList = MagicMock(side_effect=lambda *args, **kwargs: MagicMock())
+    mock_gtk.Adjustment = MagicMock(side_effect=lambda *args, **kwargs: MagicMock())
 
     # Build gi module structure
     mock_gi_module = MagicMock()

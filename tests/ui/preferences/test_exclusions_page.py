@@ -323,7 +323,7 @@ class TestExclusionsPageAddCustomExclusionRow:
         from src.ui.preferences.exclusions_page import ExclusionsPage
 
         mock_row = mock.MagicMock()
-        adw.SwitchRow.return_value = mock_row
+        adw.SwitchRow.side_effect = lambda *args, **kwargs: mock_row
 
         page = ExclusionsPage(mock_settings_manager)
         page._custom_exclusions_group = mock.MagicMock()
@@ -338,7 +338,7 @@ class TestExclusionsPageAddCustomExclusionRow:
         from src.ui.preferences.exclusions_page import ExclusionsPage
 
         mock_row = mock.MagicMock()
-        adw.SwitchRow.return_value = mock_row
+        adw.SwitchRow.side_effect = lambda *args, **kwargs: mock_row
 
         page = ExclusionsPage(mock_settings_manager)
         page._custom_exclusions_group = mock.MagicMock()

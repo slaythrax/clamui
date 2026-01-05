@@ -1,8 +1,6 @@
 # ClamUI PreferencesWindow Integration Tests
 """Integration tests for the PreferencesWindow class."""
 
-import sys
-from pathlib import Path
 from unittest import mock
 
 import pytest
@@ -23,9 +21,7 @@ class TestPreferencesWindowImport:
 
         assert isinstance(PreferencesWindow, type)
 
-    def test_preferences_window_inherits_from_adw_preferences_window(
-        self, mock_gi_modules
-    ):
+    def test_preferences_window_inherits_from_adw_preferences_window(self, mock_gi_modules):
         """Test that PreferencesWindow inherits from Adw.PreferencesWindow."""
         adw = mock_gi_modules["adw"]
         from src.ui.preferences.window import PreferencesWindow
@@ -74,19 +70,14 @@ class TestPreferencesWindowInitialization:
     @pytest.fixture
     def mock_page_modules(self):
         """Mock all page modules."""
-        with mock.patch(
-            "src.ui.preferences.window.DatabasePage"
-        ) as mock_db, mock.patch(
-            "src.ui.preferences.window.ScannerPage"
-        ) as mock_scanner, mock.patch(
-            "src.ui.preferences.window.OnAccessPage"
-        ) as mock_onaccess, mock.patch(
-            "src.ui.preferences.window.ScheduledPage"
-        ) as mock_scheduled, mock.patch(
-            "src.ui.preferences.window.ExclusionsPage"
-        ) as mock_exclusions, mock.patch(
-            "src.ui.preferences.window.SavePage"
-        ) as mock_save:
+        with (
+            mock.patch("src.ui.preferences.window.DatabasePage") as mock_db,
+            mock.patch("src.ui.preferences.window.ScannerPage") as mock_scanner,
+            mock.patch("src.ui.preferences.window.OnAccessPage") as mock_onaccess,
+            mock.patch("src.ui.preferences.window.ScheduledPage") as mock_scheduled,
+            mock.patch("src.ui.preferences.window.ExclusionsPage") as mock_exclusions,
+            mock.patch("src.ui.preferences.window.SavePage") as mock_save,
+        ):
             # Configure static page mocks to return page objects
             mock_db.create_page.return_value = mock.MagicMock()
             mock_scanner.create_page.return_value = mock.MagicMock()
@@ -324,19 +315,14 @@ class TestPreferencesWindowPageComposition:
     @pytest.fixture
     def mock_page_modules(self):
         """Mock all page modules."""
-        with mock.patch(
-            "src.ui.preferences.window.DatabasePage"
-        ) as mock_db, mock.patch(
-            "src.ui.preferences.window.ScannerPage"
-        ) as mock_scanner, mock.patch(
-            "src.ui.preferences.window.OnAccessPage"
-        ) as mock_onaccess, mock.patch(
-            "src.ui.preferences.window.ScheduledPage"
-        ) as mock_scheduled, mock.patch(
-            "src.ui.preferences.window.ExclusionsPage"
-        ) as mock_exclusions, mock.patch(
-            "src.ui.preferences.window.SavePage"
-        ) as mock_save:
+        with (
+            mock.patch("src.ui.preferences.window.DatabasePage") as mock_db,
+            mock.patch("src.ui.preferences.window.ScannerPage") as mock_scanner,
+            mock.patch("src.ui.preferences.window.OnAccessPage") as mock_onaccess,
+            mock.patch("src.ui.preferences.window.ScheduledPage") as mock_scheduled,
+            mock.patch("src.ui.preferences.window.ExclusionsPage") as mock_exclusions,
+            mock.patch("src.ui.preferences.window.SavePage") as mock_save,
+        ):
             # Configure static page mocks to return page objects
             mock_db.create_page.return_value = mock.MagicMock()
             mock_scanner.create_page.return_value = mock.MagicMock()
@@ -484,9 +470,11 @@ class TestPreferencesWindowPageComposition:
         call_args = mock_page_modules["save"].call_args
 
         # Verify all required arguments are passed
+        # Note: _freshclam_config and _clamd_config are None when SavePage is called
+        # because _setup_ui() runs before _load_configs()
         assert call_args[0][0] == window  # window reference
-        assert call_args[0][1] == window._freshclam_config
-        assert call_args[0][2] == window._clamd_config
+        assert call_args[0][1] is None  # freshclam_config (not yet loaded)
+        assert call_args[0][2] is None  # clamd_config (not yet loaded)
         assert call_args[0][3] == "/etc/clamav/freshclam.conf"
         assert call_args[0][4] == "/etc/clamav/clamd.conf"
         assert call_args[0][5] == window._clamd_available
@@ -537,19 +525,14 @@ class TestPreferencesWindowConfigLoading:
     @pytest.fixture
     def mock_page_modules(self):
         """Mock all page modules."""
-        with mock.patch(
-            "src.ui.preferences.window.DatabasePage"
-        ) as mock_db, mock.patch(
-            "src.ui.preferences.window.ScannerPage"
-        ) as mock_scanner, mock.patch(
-            "src.ui.preferences.window.OnAccessPage"
-        ) as mock_onaccess, mock.patch(
-            "src.ui.preferences.window.ScheduledPage"
-        ) as mock_scheduled, mock.patch(
-            "src.ui.preferences.window.ExclusionsPage"
-        ) as mock_exclusions, mock.patch(
-            "src.ui.preferences.window.SavePage"
-        ) as mock_save:
+        with (
+            mock.patch("src.ui.preferences.window.DatabasePage") as mock_db,
+            mock.patch("src.ui.preferences.window.ScannerPage") as mock_scanner,
+            mock.patch("src.ui.preferences.window.OnAccessPage") as mock_onaccess,
+            mock.patch("src.ui.preferences.window.ScheduledPage") as mock_scheduled,
+            mock.patch("src.ui.preferences.window.ExclusionsPage") as mock_exclusions,
+            mock.patch("src.ui.preferences.window.SavePage") as mock_save,
+        ):
             # Configure static page mocks to return page objects
             mock_db.create_page.return_value = mock.MagicMock()
             mock_scanner.create_page.return_value = mock.MagicMock()
@@ -584,9 +567,10 @@ class TestPreferencesWindowConfigLoading:
         self, mock_gi_modules, mock_settings_manager, mock_scheduler, mock_page_modules
     ):
         """Test that window loads freshclam.conf."""
-        with mock.patch("src.ui.preferences.window.parse_config") as mock_parse, mock.patch(
-            "src.ui.preferences.window.Path.exists"
-        ) as mock_exists:
+        with (
+            mock.patch("src.ui.preferences.window.parse_config") as mock_parse,
+            mock.patch("src.ui.preferences.window.Path.exists") as mock_exists,
+        ):
             mock_exists.return_value = False  # No clamd
             mock_freshclam_config = {"DatabaseDirectory": "/var/lib/clamav"}
             mock_parse.return_value = (mock_freshclam_config, None)
@@ -604,9 +588,10 @@ class TestPreferencesWindowConfigLoading:
         self, mock_gi_modules, mock_settings_manager, mock_scheduler, mock_page_modules
     ):
         """Test that window loads clamd.conf when available."""
-        with mock.patch("src.ui.preferences.window.parse_config") as mock_parse, mock.patch(
-            "src.ui.preferences.window.Path"
-        ) as mock_path_class:
+        with (
+            mock.patch("src.ui.preferences.window.parse_config") as mock_parse,
+            mock.patch("src.ui.preferences.window.Path") as mock_path_class,
+        ):
             mock_path_instance = mock.MagicMock()
             mock_path_instance.exists.return_value = True
             mock_path_class.return_value = mock_path_instance
@@ -634,9 +619,10 @@ class TestPreferencesWindowConfigLoading:
         self, mock_gi_modules, mock_settings_manager, mock_scheduler, mock_page_modules
     ):
         """Test that window populates freshclam fields."""
-        with mock.patch("src.ui.preferences.window.parse_config") as mock_parse, mock.patch(
-            "src.ui.preferences.window.Path.exists"
-        ) as mock_exists:
+        with (
+            mock.patch("src.ui.preferences.window.parse_config") as mock_parse,
+            mock.patch("src.ui.preferences.window.Path.exists") as mock_exists,
+        ):
             mock_exists.return_value = False  # No clamd
             mock_freshclam_config = {"DatabaseDirectory": "/var/lib/clamav"}
             mock_parse.return_value = (mock_freshclam_config, None)
@@ -654,9 +640,10 @@ class TestPreferencesWindowConfigLoading:
         self, mock_gi_modules, mock_settings_manager, mock_scheduler, mock_page_modules
     ):
         """Test that window populates clamd fields when available."""
-        with mock.patch("src.ui.preferences.window.parse_config") as mock_parse, mock.patch(
-            "src.ui.preferences.window.Path"
-        ) as mock_path_class:
+        with (
+            mock.patch("src.ui.preferences.window.parse_config") as mock_parse,
+            mock.patch("src.ui.preferences.window.Path") as mock_path_class,
+        ):
             mock_path_instance = mock.MagicMock()
             mock_path_instance.exists.return_value = True
             mock_path_class.return_value = mock_path_instance
@@ -685,9 +672,10 @@ class TestPreferencesWindowConfigLoading:
         self, mock_gi_modules, mock_settings_manager, mock_scheduler, mock_page_modules
     ):
         """Test that window populates on-access fields when available."""
-        with mock.patch("src.ui.preferences.window.parse_config") as mock_parse, mock.patch(
-            "src.ui.preferences.window.Path"
-        ) as mock_path_class:
+        with (
+            mock.patch("src.ui.preferences.window.parse_config") as mock_parse,
+            mock.patch("src.ui.preferences.window.Path") as mock_path_class,
+        ):
             mock_path_instance = mock.MagicMock()
             mock_path_instance.exists.return_value = True
             mock_path_class.return_value = mock_path_instance
@@ -719,9 +707,10 @@ class TestPreferencesWindowConfigLoading:
         self, mock_gi_modules, mock_settings_manager, mock_scheduler, mock_page_modules
     ):
         """Test that window populates scheduled scan fields."""
-        with mock.patch("src.ui.preferences.window.parse_config") as mock_parse, mock.patch(
-            "src.ui.preferences.window.Path.exists"
-        ) as mock_exists:
+        with (
+            mock.patch("src.ui.preferences.window.parse_config") as mock_parse,
+            mock.patch("src.ui.preferences.window.Path.exists") as mock_exists,
+        ):
             mock_exists.return_value = False  # No clamd
             mock_parse.return_value = ({}, None)
 
@@ -738,9 +727,10 @@ class TestPreferencesWindowConfigLoading:
         self, mock_gi_modules, mock_settings_manager, mock_scheduler, mock_page_modules
     ):
         """Test that window handles freshclam config load errors gracefully."""
-        with mock.patch("src.ui.preferences.window.parse_config") as mock_parse, mock.patch(
-            "src.ui.preferences.window.Path.exists"
-        ) as mock_exists:
+        with (
+            mock.patch("src.ui.preferences.window.parse_config") as mock_parse,
+            mock.patch("src.ui.preferences.window.Path.exists") as mock_exists,
+        ):
             mock_exists.return_value = False  # No clamd
             mock_parse.side_effect = Exception("Config file not found")
 
@@ -756,9 +746,10 @@ class TestPreferencesWindowConfigLoading:
         self, mock_gi_modules, mock_settings_manager, mock_scheduler, mock_page_modules
     ):
         """Test that window handles clamd config load errors gracefully."""
-        with mock.patch("src.ui.preferences.window.parse_config") as mock_parse, mock.patch(
-            "src.ui.preferences.window.Path"
-        ) as mock_path_class:
+        with (
+            mock.patch("src.ui.preferences.window.parse_config") as mock_parse,
+            mock.patch("src.ui.preferences.window.Path") as mock_path_class,
+        ):
             mock_path_instance = mock.MagicMock()
             mock_path_instance.exists.return_value = True
             mock_path_class.return_value = mock_path_instance
@@ -783,9 +774,10 @@ class TestPreferencesWindowConfigLoading:
         self, mock_gi_modules, mock_settings_manager, mock_scheduler, mock_page_modules
     ):
         """Test that window skips field population when config is None."""
-        with mock.patch("src.ui.preferences.window.parse_config") as mock_parse, mock.patch(
-            "src.ui.preferences.window.Path.exists"
-        ) as mock_exists:
+        with (
+            mock.patch("src.ui.preferences.window.parse_config") as mock_parse,
+            mock.patch("src.ui.preferences.window.Path.exists") as mock_exists,
+        ):
             mock_exists.return_value = False  # No clamd
             # Return None config (simulating empty or invalid config)
             mock_parse.return_value = (None, "Error")
