@@ -22,6 +22,7 @@ from pathlib import Path
 
 from gi.repository import GLib
 
+from .sanitize import sanitize_log_line, sanitize_log_text
 from .utils import is_flatpak, which_host_command, wrap_host_command
 
 
@@ -86,9 +87,9 @@ class LogEntry:
             timestamp=datetime.now().isoformat(),
             type=log_type,
             status=status,
-            summary=summary,
-            details=details,
-            path=path,
+            summary=sanitize_log_line(summary),
+            details=sanitize_log_text(details),
+            path=sanitize_log_line(path) if path else None,
             duration=duration,
             scheduled=scheduled,
         )
