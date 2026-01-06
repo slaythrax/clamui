@@ -368,7 +368,9 @@ class ClamUIApp(Adw.Application):
         win = self.props.active_window
         if win:
             preferences = PreferencesWindow(
-                transient_for=win, settings_manager=self._settings_manager
+                transient_for=win,
+                settings_manager=self._settings_manager,
+                tray_available=self._tray_indicator is not None,
             )
             preferences.present()
 
@@ -795,9 +797,7 @@ class ClamUIApp(Adw.Application):
 
     # Initial scan path handling (from CLI / context menu)
 
-    def set_initial_scan_paths(
-        self, file_paths: list[str], use_virustotal: bool = False
-    ) -> None:
+    def set_initial_scan_paths(self, file_paths: list[str], use_virustotal: bool = False) -> None:
         """
         Set initial file paths to scan on activation.
 
@@ -810,10 +810,7 @@ class ClamUIApp(Adw.Application):
         """
         self._initial_scan_paths = file_paths
         self._initial_use_virustotal = use_virustotal
-        logger.info(
-            f"Set {len(file_paths)} initial scan path(s) "
-            f"(virustotal={use_virustotal})"
-        )
+        logger.info(f"Set {len(file_paths)} initial scan path(s) (virustotal={use_virustotal})")
 
     def _process_initial_scan_paths(self) -> None:
         """
@@ -865,9 +862,7 @@ class ClamUIApp(Adw.Application):
             self._trigger_virustotal_scan(file_path, api_key)
         else:
             # No API key - check remembered action
-            action = self._settings_manager.get(
-                "virustotal_remember_no_key_action", "none"
-            )
+            action = self._settings_manager.get("virustotal_remember_no_key_action", "none")
 
             if action == "open_website":
                 # Open VirusTotal website directly
