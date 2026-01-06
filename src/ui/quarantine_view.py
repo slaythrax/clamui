@@ -388,13 +388,14 @@ class QuarantineView(Gtk.Box):
                 # If filtered results are empty, show placeholder and return
                 if not self._filtered_entries:
                     self._clear_old_button.set_sensitive(True)
-                    self._pagination.set_entries([])
+                    # Pass all_entries to controller, controller's entries_to_display will return empty filtered list
+                    self._pagination.set_entries(self._all_entries)
                     return False
 
             # Use controller to display entries with pagination
-            # Controller will use view's entries_to_display property for filtering
+            # Always pass all_entries - controller's entries_to_display override handles filtering
             entries_label = "filtered entries" if self._search_query else "entries"
-            self._pagination.set_entries(self._entries_to_display, entries_label)
+            self._pagination.set_entries(self._all_entries, entries_label)
 
             # Enable clear old button if there are entries
             self._clear_old_button.set_sensitive(True)
@@ -527,17 +528,19 @@ class QuarantineView(Gtk.Box):
             else:
                 # Otherwise show empty state placeholder (for when quarantine is actually empty)
                 self._listbox.set_placeholder(self._create_empty_state())
-            # Clear the pagination controller
-            self._pagination.set_entries([])
+            # Reset controller state - pass all_entries so controller maintains full dataset
+            # Controller's entries_to_display override will return empty filtered list
+            self._pagination.set_entries(self._all_entries)
             return
 
         # Results exist - ensure empty state placeholder is set (for when all entries are removed later)
         self._listbox.set_placeholder(self._create_empty_state())
 
-        # Use controller to display filtered entries with pagination
-        # Controller will use view's entries_to_display property for filtering
+        # Reset controller and provide all entries
+        # Controller's overridden entries_to_display property will return filtered entries
+        # This allows controller to maintain full dataset while displaying filtered results
         entries_label = "filtered entries" if self._search_query else "entries"
-        self._pagination.set_entries(self._entries_to_display, entries_label)
+        self._pagination.set_entries(self._all_entries, entries_label)
 
     def _on_cleanup_completed(self, removed_count: int) -> bool:
         """
