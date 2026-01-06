@@ -5,6 +5,7 @@ Contains GTK4/Adwaita widgets and views.
 """
 
 from .components_view import ComponentsView
+from .file_export import CSV_FILTER, JSON_FILTER, TEXT_FILTER, FileExportHelper, FileFilter
 from .fullscreen_dialog import FullscreenLogDialog
 from .logs_view import LogsView
 from .pagination import PaginatedListController
@@ -20,4 +21,9 @@ __all__ = [
     "PreferencesDialog",
     "QuarantineView",
     "PaginatedListController",
+    "FileExportHelper",
+    "FileFilter",
+    "TEXT_FILTER",
+    "CSV_FILTER",
+    "JSON_FILTER",
 ]
