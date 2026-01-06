@@ -3,6 +3,7 @@
 
 import hashlib
 import tempfile
+import time
 from pathlib import Path
 from unittest import mock
 
@@ -384,9 +385,370 @@ class TestClose:
         """Test that close releases the session."""
         client = VirusTotalClient(api_key="test")
         # Force session creation
-        session = client._get_session()
+        client._get_session()
         assert client._session is not None
 
         client.close()
 
         assert client._session is None
+
+
+class TestMakeRequest:
+    """Tests for _make_request method."""
+
+    @pytest.fixture
+    def client(self):
+        """Create a client with API key."""
+        return VirusTotalClient(api_key="test_api_key")
+
+    def test_make_request_cancelled(self, client):
+        """Test _make_request returns early when cancelled."""
+        client._cancelled = True
+
+        response, error = client._make_request("GET", "/files/abc")
+
+        assert response is None
+        assert "cancelled" in error.lower()
+
+    def test_make_request_auth_error(self, client):
+        """Test _make_request handles 401 auth error."""
+        mock_response = mock.Mock()
+        mock_response.status_code = 401
+
+        with mock.patch.object(client._get_session(), "request", return_value=mock_response):
+            response, error = client._make_request("GET", "/files/abc")
+
+        assert error == "Invalid API key"
+
+    def test_make_request_forbidden(self, client):
+        """Test _make_request handles 403 forbidden."""
+        mock_response = mock.Mock()
+        mock_response.status_code = 403
+
+        with mock.patch.object(client._get_session(), "request", return_value=mock_response):
+            response, error = client._make_request("GET", "/files/abc")
+
+        assert "permissions" in error.lower()
+
+    def test_make_request_timeout_retries(self, client):
+        """Test _make_request retries on timeout."""
+        import requests
+
+        with mock.patch.object(
+            client._get_session(),
+            "request",
+            side_effect=requests.exceptions.Timeout("timeout"),
+        ):
+            with mock.patch("time.sleep"):  # Don't actually sleep
+                response, error = client._make_request("GET", "/files/abc")
+
+        assert response is None
+        assert "timed out" in error.lower()
+
+    def test_make_request_connection_error_retries(self, client):
+        """Test _make_request retries on connection error."""
+        import requests
+
+        with mock.patch.object(
+            client._get_session(),
+            "request",
+            side_effect=requests.exceptions.ConnectionError("network"),
+        ):
+            with mock.patch("time.sleep"):  # Don't actually sleep
+                response, error = client._make_request("GET", "/files/abc")
+
+        assert response is None
+        assert "connection failed" in error.lower()
+
+    def test_make_request_general_exception(self, client):
+        """Test _make_request handles general request exceptions."""
+        import requests
+
+        with mock.patch.object(
+            client._get_session(),
+            "request",
+            side_effect=requests.exceptions.RequestException("error"),
+        ):
+            response, error = client._make_request("GET", "/files/abc")
+
+        assert response is None
+        assert "failed" in error.lower()
+
+
+class TestUploadFile:
+    """Tests for upload_file method."""
+
+    @pytest.fixture
+    def client(self):
+        """Create a client with API key."""
+        return VirusTotalClient(api_key="test_api_key_" + "a" * 50)
+
+    def test_upload_file_not_found(self, client):
+        """Test upload_file with non-existent file."""
+        client._request_times = []  # Bypass rate limiting
+
+        result = client.upload_file("/nonexistent/file", "a" * 64)
+
+        assert result.status == VTScanStatus.ERROR
+        assert "not found" in result.error_message.lower()
+
+    def test_upload_file_cancelled(self, client, tmp_path):
+        """Test upload_file returns early when cancelled."""
+        test_file = tmp_path / "test.txt"
+        test_file.write_text("test content")
+        client._cancelled = True
+
+        result = client.upload_file(str(test_file), "a" * 64)
+
+        assert result.status == VTScanStatus.ERROR
+        assert "cancelled" in result.error_message.lower()
+
+    def test_upload_file_success(self, client, tmp_path):
+        """Test successful file upload."""
+        test_file = tmp_path / "test.txt"
+        test_file.write_text("test content")
+        sha256 = "a" * 64
+
+        # Mock response for upload
+        mock_upload_response = mock.Mock()
+        mock_upload_response.status_code = 200
+        mock_upload_response.json.return_value = {"data": {"id": "analysis_123"}}
+
+        # Mock response for analysis polling
+        mock_poll_response = mock.Mock()
+        mock_poll_response.status_code = 200
+        mock_poll_response.json.return_value = {"data": {"attributes": {"status": "completed"}}}
+
+        # Mock response for hash check
+        mock_hash_response = mock.Mock()
+        mock_hash_response.status_code = 200
+        mock_hash_response.json.return_value = {
+            "data": {
+                "attributes": {
+                    "last_analysis_stats": {
+                        "malicious": 0,
+                        "suspicious": 0,
+                        "undetected": 70,
+                        "harmless": 0,
+                    },
+                    "last_analysis_results": {},
+                }
+            }
+        }
+
+        client._request_times = []  # Bypass rate limiting
+
+        with mock.patch.object(
+            client,
+            "_make_request",
+            side_effect=[
+                (mock_upload_response, None),
+                (mock_poll_response, None),
+                (mock_hash_response, None),
+            ],
+        ):
+            result = client.upload_file(str(test_file), sha256)
+
+        assert result.status == VTScanStatus.CLEAN
+
+
+class TestWaitForRateLimit:
+    """Tests for _wait_for_rate_limit method."""
+
+    def test_wait_for_rate_limit_cancelled(self):
+        """Test _wait_for_rate_limit returns False when cancelled."""
+        client = VirusTotalClient(api_key="test")
+        # Fill up rate limit
+        client._request_times = [time.time() for _ in range(VT_RATE_LIMIT_REQUESTS)]
+        client._cancelled = True
+
+        result = client._wait_for_rate_limit()
+
+        assert result is False
+
+
+class TestPollAnalysis:
+    """Tests for _poll_analysis method."""
+
+    @pytest.fixture
+    def client(self):
+        """Create a client with API key."""
+        return VirusTotalClient(api_key="test_api_key")
+
+    def test_poll_analysis_cancelled(self, client):
+        """Test _poll_analysis returns early when cancelled."""
+        client._cancelled = True
+
+        result = client._poll_analysis("analysis_123", "/test/file", "a" * 64)
+
+        assert result.status == VTScanStatus.ERROR
+        assert "cancelled" in result.error_message.lower()
+
+    def test_poll_analysis_queued(self, client):
+        """Test _poll_analysis waits when status is queued."""
+        mock_response = mock.Mock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"data": {"attributes": {"status": "queued"}}}
+
+        # After a few polls, return completed
+        mock_complete_response = mock.Mock()
+        mock_complete_response.status_code = 200
+        mock_complete_response.json.return_value = {"data": {"attributes": {"status": "completed"}}}
+
+        mock_hash_response = mock.Mock()
+        mock_hash_response.status_code = 200
+        mock_hash_response.json.return_value = {
+            "data": {
+                "attributes": {
+                    "last_analysis_stats": {
+                        "malicious": 0,
+                        "suspicious": 0,
+                        "undetected": 70,
+                        "harmless": 0,
+                    },
+                    "last_analysis_results": {},
+                }
+            }
+        }
+
+        client._request_times = []  # Bypass rate limiting
+
+        with mock.patch.object(
+            client,
+            "_make_request",
+            side_effect=[
+                (mock_response, None),
+                (mock_complete_response, None),
+                (mock_hash_response, None),
+            ],
+        ):
+            with mock.patch("time.sleep"):  # Don't actually sleep
+                with mock.patch("time.time", side_effect=[0, 0, 0, 5, 5, 5, 10, 10, 10]):
+                    result = client._poll_analysis("analysis_123", "/test/file", "a" * 64)
+
+        assert result.status == VTScanStatus.CLEAN
+
+
+class TestScanFileAsync:
+    """Tests for scan_file_async method."""
+
+    def test_scan_file_async_calls_callback(self):
+        """Test scan_file_async runs scan and calls callback."""
+        import threading
+
+        client = VirusTotalClient()  # No API key to get quick error result
+        results = []
+        event = threading.Event()
+
+        def callback(result):
+            results.append(result)
+            event.set()
+
+        # Mock GLib to avoid import errors
+        with mock.patch.dict(
+            "sys.modules", {"gi": mock.MagicMock(), "gi.repository": mock.MagicMock()}
+        ):
+            # Mock GLib.idle_add to call the callback directly
+            mock_glib = mock.MagicMock()
+            mock_glib.idle_add = lambda fn, *args: fn(*args)
+            with mock.patch.dict("sys.modules", {"gi.repository": mock.MagicMock(GLib=mock_glib)}):
+                client.scan_file_async("/test/file", callback)
+
+                # Wait for thread to complete (with timeout)
+                event.wait(timeout=5.0)
+
+        assert len(results) == 1
+        assert results[0].status == VTScanStatus.ERROR
+
+
+class TestSetApiKey:
+    """Tests for set_api_key method."""
+
+    def test_set_api_key_resets_session(self):
+        """Test set_api_key resets session when key changes."""
+        client = VirusTotalClient(api_key="old_key")
+        # Force session creation
+        client._get_session()
+        assert client._session is not None
+
+        client.set_api_key("new_key")
+
+        assert client._session is None
+        assert client._api_key == "new_key"
+
+
+class TestCheckFileHashErrors:
+    """Tests for error handling in check_file_hash."""
+
+    @pytest.fixture
+    def client(self):
+        """Create a client with API key."""
+        return VirusTotalClient(api_key="test_api_key")
+
+    def test_check_hash_api_error(self, client):
+        """Test check_file_hash handles unexpected HTTP status."""
+        mock_response = mock.Mock()
+        mock_response.status_code = 500
+
+        client._request_times = []  # Bypass rate limiting
+
+        with mock.patch.object(client, "_make_request", return_value=(mock_response, None)):
+            result = client.check_file_hash("a" * 64)
+
+        assert result.status == VTScanStatus.ERROR
+        assert "HTTP 500" in result.error_message
+
+    def test_check_hash_no_response(self, client):
+        """Test check_file_hash handles None response."""
+        client._request_times = []  # Bypass rate limiting
+
+        with mock.patch.object(client, "_make_request", return_value=(None, None)):
+            result = client.check_file_hash("a" * 64)
+
+        assert result.status == VTScanStatus.ERROR
+        assert "no response" in result.error_message.lower()
+
+    def test_check_hash_request_error(self, client):
+        """Test check_file_hash handles request error."""
+        client._request_times = []  # Bypass rate limiting
+
+        with mock.patch.object(client, "_make_request", return_value=(None, "Connection failed")):
+            result = client.check_file_hash("a" * 64)
+
+        assert result.status == VTScanStatus.ERROR
+        assert "Connection failed" in result.error_message
+
+
+class TestScanFileSyncCoverage:
+    """Additional tests for scan_file_sync to cover edge cases."""
+
+    @pytest.fixture
+    def client(self):
+        """Create a client with API key."""
+        return VirusTotalClient(api_key="test_api_key")
+
+    def test_scan_file_hash_error(self, client, tmp_path):
+        """Test scan_file_sync handles hash calculation error."""
+        test_file = tmp_path / "test.txt"
+        test_file.write_text("test")
+
+        with mock.patch.object(
+            VirusTotalClient,
+            "calculate_sha256",
+            side_effect=PermissionError("denied"),
+        ):
+            result = client.scan_file_sync(str(test_file))
+
+        assert result.status == VTScanStatus.ERROR
+        assert "cannot read" in result.error_message.lower()
+
+    def test_scan_file_size_error(self, client, tmp_path):
+        """Test scan_file_sync handles file size access error."""
+        test_file = tmp_path / "test.txt"
+        test_file.write_text("test")
+
+        with mock.patch("os.path.getsize", side_effect=OSError("size error")):
+            result = client.scan_file_sync(str(test_file))
+
+        assert result.status == VTScanStatus.ERROR
+        assert "cannot access" in result.error_message.lower()
