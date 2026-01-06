@@ -64,7 +64,7 @@ class VirusTotalPage:
         """
         page = Adw.PreferencesPage(
             title="VirusTotal",
-            icon_name="globe-symbolic",
+            icon_name="network-server-symbolic",
         )
 
         # Store references for callbacks
@@ -176,7 +176,7 @@ class VirusTotalPage:
         link_row.set_activatable(True)
         link_row.connect("activated", lambda row: VirusTotalPage._on_get_api_key_clicked())
 
-        link_icon = Gtk.Image.new_from_icon_name("globe-symbolic")
+        link_icon = Gtk.Image.new_from_icon_name("network-server-symbolic")
         link_icon.add_css_class("dim-label")
         link_row.add_prefix(link_icon)
 

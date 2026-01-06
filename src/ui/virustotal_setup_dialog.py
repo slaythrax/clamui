@@ -134,17 +134,12 @@ class VirusTotalSetupDialog(Adw.Dialog):
         link_row.set_activatable(True)
         link_row.connect("activated", self._on_get_api_key_clicked)
 
-        # Add external link icon
-        link_icon = Gtk.Image.new_from_icon_name("external-link-symbolic")
-        link_icon.add_css_class("dim-label")
-        link_row.add_suffix(link_icon)
-
         # Add chevron for navigation
         chevron = Gtk.Image.new_from_icon_name("go-next-symbolic")
         chevron.add_css_class("dim-label")
         link_row.add_suffix(chevron)
 
-        info_icon = Gtk.Image.new_from_icon_name("globe-symbolic")
+        info_icon = Gtk.Image.new_from_icon_name("network-server-symbolic")
         info_icon.add_css_class("dim-label")
         link_row.add_prefix(info_icon)
 
