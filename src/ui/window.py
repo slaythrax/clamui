@@ -386,7 +386,7 @@ class MainWindow(Adw.ApplicationWindow):
 
         # Statistics button
         self._statistics_button = Gtk.ToggleButton()
-        self._statistics_button.set_icon_name("chart-line-symbolic")
+        self._statistics_button.set_icon_name("applications-science-symbolic")
         self._statistics_button.set_tooltip_text("Statistics Dashboard (Ctrl+6)")
         self._statistics_button.set_action_name("app.show-statistics")
         nav_box.append(self._statistics_button)
