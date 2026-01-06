@@ -78,7 +78,11 @@ class DaemonScanner:
         return (True, "clamd is available")
 
     def scan_sync(
-        self, path: str, recursive: bool = True, profile_exclusions: dict | None = None
+        self,
+        path: str,
+        recursive: bool = True,
+        profile_exclusions: dict | None = None,
+        count_targets: bool = True,
     ) -> ScanResult:
         """
         Execute a synchronous scan using clamdscan.
@@ -90,6 +94,10 @@ class DaemonScanner:
             path: Path to file or directory to scan
             recursive: Whether to scan directories recursively (always true for clamdscan)
             profile_exclusions: Optional exclusions from a scan profile.
+            count_targets: Whether to pre-count files/directories before scanning.
+                If False, scanned_files and scanned_dirs will be 0 in the result,
+                but scanning will be faster for large directories by avoiding
+                a separate tree walk. Default is True for backwards compatibility.
 
         Returns:
             ScanResult with scan details
@@ -137,7 +145,11 @@ class DaemonScanner:
             return result
 
         # Count files/directories before scanning (clamdscan doesn't report these)
-        file_count, dir_count = self._count_scan_targets(path, profile_exclusions)
+        # Skip counting if count_targets is False for performance on large directories
+        if count_targets:
+            file_count, dir_count = self._count_scan_targets(path, profile_exclusions)
+        else:
+            file_count, dir_count = 0, 0
 
         # Build clamdscan command
         cmd = self._build_command(path, recursive, profile_exclusions)
@@ -248,6 +260,7 @@ class DaemonScanner:
         callback: Callable[[ScanResult], None],
         recursive: bool = True,
         profile_exclusions: dict | None = None,
+        count_targets: bool = True,
     ) -> None:
         """
         Execute an asynchronous scan using clamdscan.
@@ -260,10 +273,14 @@ class DaemonScanner:
             callback: Function to call with ScanResult when scan completes
             recursive: Whether to scan directories recursively
             profile_exclusions: Optional exclusions from a scan profile.
+            count_targets: Whether to pre-count files/directories before scanning.
+                If False, scanned_files and scanned_dirs will be 0 in the result,
+                but scanning will be faster for large directories by avoiding
+                a separate tree walk. Default is True for backwards compatibility.
         """
 
         def scan_thread():
-            result = self.scan_sync(path, recursive, profile_exclusions)
+            result = self.scan_sync(path, recursive, profile_exclusions, count_targets)
             GLib.idle_add(callback, result)
 
         thread = threading.Thread(target=scan_thread)

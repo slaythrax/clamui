@@ -350,3 +350,186 @@ class TestDaemonScannerFilterExcludedThreats:
         # Should still be infected since exclusion is disabled
         assert filtered.status == scan_status_class.INFECTED
         assert filtered.infected_count == 1
+
+
+class TestDaemonScannerCountTargets:
+    """Tests for DaemonScanner count_targets parameter."""
+
+    def test_scan_sync_with_count_targets_true_counts_files(
+        self, tmp_path, daemon_scanner_class, scan_status_class
+    ):
+        """Test that count_targets=True (default) counts files and directories."""
+        # Create test directory structure
+        test_dir = tmp_path / "scan_test"
+        test_dir.mkdir()
+        (test_dir / "file1.txt").write_text("content1")
+        (test_dir / "file2.txt").write_text("content2")
+        subdir = test_dir / "subdir"
+        subdir.mkdir()
+        (subdir / "file3.txt").write_text("content3")
+
+        scanner = daemon_scanner_class()
+
+        with (
+            patch("src.core.daemon_scanner.check_clamdscan_installed") as mock_installed,
+            patch("src.core.daemon_scanner.check_clamd_connection") as mock_connection,
+            patch("subprocess.Popen") as mock_popen,
+        ):
+            mock_installed.return_value = (True, "ClamAV 1.0.0")
+            mock_connection.return_value = (True, "PONG")
+
+            mock_process = MagicMock()
+            mock_process.communicate.return_value = ("", "")
+            mock_process.returncode = 0
+            mock_popen.return_value = mock_process
+
+            result = scanner.scan_sync(str(test_dir), count_targets=True)
+
+        assert result.status == scan_status_class.CLEAN
+        # Should have counted files (3 files)
+        assert result.scanned_files == 3
+        # Should have counted directories (root + subdir = 2)
+        assert result.scanned_dirs == 2
+
+    def test_scan_sync_with_count_targets_false_skips_counting(
+        self, tmp_path, daemon_scanner_class, scan_status_class
+    ):
+        """Test that count_targets=False skips file/directory counting."""
+        # Create test directory structure
+        test_dir = tmp_path / "scan_test"
+        test_dir.mkdir()
+        (test_dir / "file1.txt").write_text("content1")
+        (test_dir / "file2.txt").write_text("content2")
+        subdir = test_dir / "subdir"
+        subdir.mkdir()
+        (subdir / "file3.txt").write_text("content3")
+
+        scanner = daemon_scanner_class()
+
+        with (
+            patch("src.core.daemon_scanner.check_clamdscan_installed") as mock_installed,
+            patch("src.core.daemon_scanner.check_clamd_connection") as mock_connection,
+            patch("subprocess.Popen") as mock_popen,
+        ):
+            mock_installed.return_value = (True, "ClamAV 1.0.0")
+            mock_connection.return_value = (True, "PONG")
+
+            mock_process = MagicMock()
+            mock_process.communicate.return_value = ("", "")
+            mock_process.returncode = 0
+            mock_popen.return_value = mock_process
+
+            result = scanner.scan_sync(str(test_dir), count_targets=False)
+
+        assert result.status == scan_status_class.CLEAN
+        # Counts should be 0 when count_targets=False
+        assert result.scanned_files == 0
+        assert result.scanned_dirs == 0
+
+    def test_scan_sync_count_targets_false_still_detects_infections(
+        self, tmp_path, daemon_scanner_class, scan_status_class
+    ):
+        """Test that count_targets=False still correctly reports infections."""
+        test_dir = tmp_path / "scan_test"
+        test_dir.mkdir()
+        (test_dir / "malware.exe").write_text("fake malware")
+
+        scanner = daemon_scanner_class()
+
+        with (
+            patch("src.core.daemon_scanner.check_clamdscan_installed") as mock_installed,
+            patch("src.core.daemon_scanner.check_clamd_connection") as mock_connection,
+            patch("subprocess.Popen") as mock_popen,
+        ):
+            mock_installed.return_value = (True, "ClamAV 1.0.0")
+            mock_connection.return_value = (True, "PONG")
+
+            mock_process = MagicMock()
+            infected_output = f"{test_dir}/malware.exe: Win.Trojan.Test FOUND\n"
+            mock_process.communicate.return_value = (infected_output, "")
+            mock_process.returncode = 1
+            mock_popen.return_value = mock_process
+
+            result = scanner.scan_sync(str(test_dir), count_targets=False)
+
+        # Should still detect infection
+        assert result.status == scan_status_class.INFECTED
+        assert result.infected_count == 1
+        assert len(result.threat_details) == 1
+        assert result.threat_details[0].threat_name == "Win.Trojan.Test"
+        # But counts should still be 0
+        assert result.scanned_files == 0
+        assert result.scanned_dirs == 0
+
+    def test_scan_sync_default_count_targets_is_true(
+        self, tmp_path, daemon_scanner_class, scan_status_class
+    ):
+        """Test that count_targets defaults to True for backwards compatibility."""
+        test_dir = tmp_path / "scan_test"
+        test_dir.mkdir()
+        (test_dir / "file.txt").write_text("content")
+
+        scanner = daemon_scanner_class()
+
+        with (
+            patch("src.core.daemon_scanner.check_clamdscan_installed") as mock_installed,
+            patch("src.core.daemon_scanner.check_clamd_connection") as mock_connection,
+            patch("subprocess.Popen") as mock_popen,
+            patch.object(scanner, "_count_scan_targets") as mock_count,
+        ):
+            mock_installed.return_value = (True, "ClamAV 1.0.0")
+            mock_connection.return_value = (True, "PONG")
+            mock_count.return_value = (1, 1)
+
+            mock_process = MagicMock()
+            mock_process.communicate.return_value = ("", "")
+            mock_process.returncode = 0
+            mock_popen.return_value = mock_process
+
+            # Call without count_targets parameter (should default to True)
+            scanner.scan_sync(str(test_dir))
+
+        # _count_scan_targets should have been called
+        mock_count.assert_called_once()
+
+    def test_scan_async_passes_count_targets_to_sync(self, tmp_path, daemon_scanner_class):
+        """Test that scan_async passes count_targets to scan_sync."""
+        test_dir = tmp_path / "scan_test"
+        test_dir.mkdir()
+
+        scanner = daemon_scanner_class()
+        callback = MagicMock()
+
+        with (
+            patch.object(scanner, "scan_sync") as mock_sync,
+            patch("src.core.daemon_scanner.GLib.idle_add"),
+        ):
+            from src.core.scanner import ScanResult, ScanStatus
+
+            mock_sync.return_value = ScanResult(
+                status=ScanStatus.CLEAN,
+                path=str(test_dir),
+                stdout="",
+                stderr="",
+                exit_code=0,
+                infected_files=[],
+                scanned_files=0,
+                scanned_dirs=0,
+                infected_count=0,
+                error_message=None,
+                threat_details=[],
+            )
+
+            # Call async with count_targets=False
+            scanner.scan_async(str(test_dir), callback, count_targets=False)
+
+            # Wait for thread to execute
+            import time
+
+            time.sleep(0.1)
+
+        # Verify scan_sync was called with count_targets=False
+        mock_sync.assert_called_once()
+        call_args = mock_sync.call_args
+        assert call_args[0][0] == str(test_dir)  # path
+        assert call_args[0][3] is False  # count_targets (4th positional arg)
