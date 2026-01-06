@@ -30,6 +30,10 @@ from ..core.quarantine import (
 from .pagination import PaginatedListController
 from .utils import add_row_icon
 
+# Backward compatibility constants for tests
+INITIAL_DISPLAY_LIMIT = PaginatedListController.DEFAULT_INITIAL_LIMIT
+LOAD_MORE_BATCH_SIZE = PaginatedListController.DEFAULT_BATCH_SIZE
+
 
 def format_file_size(size_bytes: int) -> str:
     """
@@ -425,6 +429,48 @@ class QuarantineView(Gtk.Box):
             return self._filtered_entries
         return self._all_entries
 
+    # Backward compatibility properties and methods for tests
+    @property
+    def _displayed_count(self) -> int:
+        """Get the current displayed count from pagination controller (backward compatibility)."""
+        return self._pagination.displayed_count if hasattr(self, '_pagination') else 0
+
+    @_displayed_count.setter
+    def _displayed_count(self, value: int):
+        """Set the displayed count on pagination controller (backward compatibility)."""
+        if hasattr(self, '_pagination'):
+            self._pagination._displayed_count = value
+
+    @property
+    def _load_more_row(self):
+        """Get the load more row from pagination controller (backward compatibility)."""
+        return self._pagination.load_more_row if hasattr(self, '_pagination') else None
+
+    @_load_more_row.setter
+    def _load_more_row(self, value):
+        """Set the load more row on pagination controller (backward compatibility)."""
+        if hasattr(self, '_pagination'):
+            self._pagination._load_more_row = value
+
+    def _display_entry_batch(self, start_index: int, count: int):
+        """Display a batch of entries (backward compatibility - delegates to pagination controller)."""
+        if hasattr(self, '_pagination'):
+            self._pagination.display_batch(start_index, count)
+
+    def _add_load_more_button(self, entries_label: str = "entries"):
+        """Add load more button (backward compatibility - delegates to pagination controller)."""
+        if hasattr(self, '_pagination'):
+            self._pagination.add_load_more_button(entries_label)
+
+    def _on_load_more_clicked(self, button):
+        """Handle load more button click (backward compatibility - delegates to pagination controller)."""
+        if hasattr(self, '_pagination'):
+            self._pagination.load_more()
+
+    def _on_show_all_clicked(self, button):
+        """Handle show all button click (backward compatibility - delegates to pagination controller)."""
+        if hasattr(self, '_pagination'):
+            self._pagination.show_all()
 
     def _on_refresh_clicked(self, button):
         """Handle refresh button click."""
