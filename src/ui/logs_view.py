@@ -16,6 +16,7 @@ from .file_export import CSV_FILTER, JSON_FILTER, TEXT_FILTER, FileExportHelper
 from .fullscreen_dialog import FullscreenLogDialog
 from .pagination import PaginatedListController
 from .utils import add_row_icon
+from .view_helpers import EmptyStateConfig, create_empty_state, create_loading_row
 
 # Backward compatibility constants for tests
 INITIAL_LOG_DISPLAY_LIMIT = PaginatedListController.DEFAULT_INITIAL_LIMIT
@@ -230,32 +231,13 @@ class LogsView(Gtk.Box):
 
     def _create_empty_state(self) -> Gtk.Widget:
         """Create the empty state placeholder widget."""
-        empty_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        empty_box.set_valign(Gtk.Align.CENTER)
-        empty_box.set_margin_top(24)
-        empty_box.set_margin_bottom(24)
-        empty_box.set_spacing(12)
-
-        # Empty state icon
-        icon = Gtk.Image()
-        icon.set_from_icon_name("document-open-recent-symbolic")
-        icon.set_pixel_size(48)
-        icon.add_css_class("dim-label")
-        empty_box.append(icon)
-
-        # Empty state message
-        label = Gtk.Label()
-        label.set_text("No logs yet")
-        label.add_css_class("dim-label")
-        empty_box.append(label)
-
-        sublabel = Gtk.Label()
-        sublabel.set_text("Logs from scans and updates will appear here")
-        sublabel.add_css_class("dim-label")
-        sublabel.add_css_class("caption")
-        empty_box.append(sublabel)
-
-        return empty_box
+        return create_empty_state(
+            EmptyStateConfig(
+                icon_name="document-open-recent-symbolic",
+                title="No logs yet",
+                subtitle="Logs from scans and updates will appear here",
+            )
+        )
 
     def _create_loading_state(self) -> Gtk.ListBoxRow:
         """
@@ -264,31 +246,7 @@ class LogsView(Gtk.Box):
         Returns:
             Gtk.ListBoxRow containing spinner and loading text
         """
-        row = Gtk.ListBoxRow()
-        row.set_selectable(False)
-        row.set_activatable(False)
-
-        loading_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
-        loading_box.set_halign(Gtk.Align.CENTER)
-        loading_box.set_valign(Gtk.Align.CENTER)
-        loading_box.set_margin_top(24)
-        loading_box.set_margin_bottom(24)
-        loading_box.set_spacing(12)
-
-        # Loading spinner
-        spinner = Gtk.Spinner()
-        spinner.set_spinning(True)
-        loading_box.append(spinner)
-
-        # Loading message
-        label = Gtk.Label()
-        label.set_text("Loading logs...")
-        label.add_css_class("dim-label")
-        loading_box.append(label)
-
-        row.set_child(loading_box)
-
-        return row
+        return create_loading_row("Loading logs...")
 
     def _create_log_detail_section(self, parent: Gtk.Box):
         """

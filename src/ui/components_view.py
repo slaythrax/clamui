@@ -16,6 +16,7 @@ from ..core.utils import (
     check_freshclam_installed,
 )
 from .utils import add_row_icon
+from .view_helpers import StatusLevel, clear_status_classes, set_status_class
 
 # Setup guide content for each component
 SETUP_GUIDES = {
@@ -414,18 +415,16 @@ class ComponentsView(Gtk.Box):
             return
 
         # Remove previous CSS classes
-        status_icon.remove_css_class("success")
-        status_icon.remove_css_class("warning")
-        status_icon.remove_css_class("error")
+        clear_status_classes(status_icon)
 
         if is_installed:
             status_icon.set_from_icon_name("emblem-ok-symbolic")
-            status_icon.add_css_class("success")
+            set_status_class(status_icon, StatusLevel.SUCCESS)
             status_label.set_text("Installed")
             expander.set_subtitle(message or "Installed")
         else:
             status_icon.set_from_icon_name("dialog-warning-symbolic")
-            status_icon.add_css_class("warning")
+            set_status_class(status_icon, StatusLevel.WARNING)
             status_label.set_text("Not installed")
             expander.set_subtitle("Not installed - expand for setup instructions")
 
@@ -446,23 +445,21 @@ class ComponentsView(Gtk.Box):
             return
 
         # Remove previous CSS classes
-        status_icon.remove_css_class("success")
-        status_icon.remove_css_class("warning")
-        status_icon.remove_css_class("error")
+        clear_status_classes(status_icon)
 
         if status == DaemonStatus.RUNNING:
             status_icon.set_from_icon_name("emblem-ok-symbolic")
-            status_icon.add_css_class("success")
+            set_status_class(status_icon, StatusLevel.SUCCESS)
             status_label.set_text("Running")
             expander.set_subtitle("Daemon is running")
         elif status == DaemonStatus.STOPPED:
             status_icon.set_from_icon_name("media-playback-stop-symbolic")
-            status_icon.add_css_class("warning")
+            set_status_class(status_icon, StatusLevel.WARNING)
             status_label.set_text("Stopped")
             expander.set_subtitle("Daemon is installed but not running")
         elif status == DaemonStatus.NOT_INSTALLED:
             status_icon.set_from_icon_name("dialog-warning-symbolic")
-            status_icon.add_css_class("warning")
+            set_status_class(status_icon, StatusLevel.WARNING)
             status_label.set_text("Not installed")
             expander.set_subtitle("Not installed - expand for setup instructions")
         else:  # UNKNOWN

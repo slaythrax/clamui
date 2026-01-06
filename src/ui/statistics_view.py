@@ -25,6 +25,13 @@ from ..core.statistics_calculator import (
     Timeframe,
 )
 from .utils import add_row_icon
+from .view_helpers import (
+    EmptyStateConfig,
+    StatusLevel,
+    clear_status_classes,
+    create_empty_state,
+    set_status_class,
+)
 
 
 class StatisticsView(Gtk.Box):
@@ -350,33 +357,14 @@ class StatisticsView(Gtk.Box):
         Returns:
             Gtk.Box containing empty state UI
         """
-        empty_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        empty_box.set_valign(Gtk.Align.CENTER)
-        empty_box.set_halign(Gtk.Align.CENTER)
-        empty_box.set_margin_top(24)
-        empty_box.set_margin_bottom(24)
-        empty_box.set_spacing(12)
-
-        # Empty state icon
-        icon = Gtk.Image()
-        icon.set_from_icon_name("chart-line-symbolic")
-        icon.set_pixel_size(48)
-        icon.add_css_class("dim-label")
-        empty_box.append(icon)
-
-        # Empty state message
-        label = Gtk.Label()
-        label.set_label("No scan data available")
-        label.add_css_class("dim-label")
-        empty_box.append(label)
-
-        sublabel = Gtk.Label()
-        sublabel.set_label("Run some scans to see activity trends here")
-        sublabel.add_css_class("dim-label")
-        sublabel.add_css_class("caption")
-        empty_box.append(sublabel)
-
-        return empty_box
+        return create_empty_state(
+            EmptyStateConfig(
+                icon_name="chart-line-symbolic",
+                title="No scan data available",
+                subtitle="Run some scans to see activity trends here",
+                center_horizontally=True,
+            )
+        )
 
     def _update_chart(self, trend_data: list[dict]):
         """
@@ -748,27 +736,19 @@ class StatisticsView(Gtk.Box):
         if status.level == ProtectionLevel.PROTECTED.value:
             self._protection_row_icon.set_from_icon_name("emblem-ok-symbolic")
             self._status_badge.set_label("Protected")
-            self._status_badge.remove_css_class("warning")
-            self._status_badge.remove_css_class("error")
-            self._status_badge.add_css_class("success")
+            set_status_class(self._status_badge, StatusLevel.SUCCESS)
         elif status.level == ProtectionLevel.AT_RISK.value:
             self._protection_row_icon.set_from_icon_name("dialog-warning-symbolic")
             self._status_badge.set_label("At Risk")
-            self._status_badge.remove_css_class("success")
-            self._status_badge.remove_css_class("error")
-            self._status_badge.add_css_class("warning")
+            set_status_class(self._status_badge, StatusLevel.WARNING)
         elif status.level == ProtectionLevel.UNPROTECTED.value:
             self._protection_row_icon.set_from_icon_name("dialog-error-symbolic")
             self._status_badge.set_label("Unprotected")
-            self._status_badge.remove_css_class("success")
-            self._status_badge.remove_css_class("warning")
-            self._status_badge.add_css_class("error")
+            set_status_class(self._status_badge, StatusLevel.ERROR)
         else:
             self._protection_row_icon.set_from_icon_name("dialog-question-symbolic")
             self._status_badge.set_label("Unknown")
-            self._status_badge.remove_css_class("success")
-            self._status_badge.remove_css_class("warning")
-            self._status_badge.remove_css_class("error")
+            clear_status_classes(self._status_badge)
 
         # Update last scan row
         if status.last_scan_timestamp:
@@ -808,37 +788,18 @@ class StatisticsView(Gtk.Box):
         Returns:
             Gtk.Box containing the empty state UI
         """
-        empty_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        empty_box.set_valign(Gtk.Align.CENTER)
-        empty_box.set_halign(Gtk.Align.CENTER)
-        empty_box.set_margin_top(48)
-        empty_box.set_margin_bottom(48)
-        empty_box.set_spacing(12)
-
-        # Empty state icon
-        icon = Gtk.Image()
-        icon.set_from_icon_name("folder-saved-search-symbolic")
-        icon.set_pixel_size(48)
-        icon.add_css_class("dim-label")
-        empty_box.append(icon)
-
-        # Empty state message
-        label = Gtk.Label()
-        label.set_label("No scan history yet")
-        label.add_css_class("dim-label")
-        label.add_css_class("title-2")
-        empty_box.append(label)
-
-        sublabel = Gtk.Label()
-        sublabel.set_label("Run your first scan to see statistics and protection status")
-        sublabel.add_css_class("dim-label")
-        sublabel.add_css_class("caption")
-        sublabel.set_wrap(True)
-        sublabel.set_max_width_chars(40)
-        sublabel.set_justify(Gtk.Justification.CENTER)
-        empty_box.append(sublabel)
-
-        return empty_box
+        return create_empty_state(
+            EmptyStateConfig(
+                icon_name="folder-saved-search-symbolic",
+                title="No scan history yet",
+                subtitle="Run your first scan to see statistics and protection status",
+                margin_vertical=48,
+                title_css_class="title-2",
+                center_horizontally=True,
+                wrap_subtitle=True,
+                max_subtitle_chars=40,
+            )
+        )
 
     def _create_error_state(self, error_message: str = "Unable to load statistics") -> Gtk.Box:
         """
@@ -922,9 +883,7 @@ class StatisticsView(Gtk.Box):
         self._protection_row.set_subtitle("Unable to determine status")
         self._protection_row_icon.set_from_icon_name("dialog-error-symbolic")
         self._status_badge.set_label("Error")
-        self._status_badge.remove_css_class("success")
-        self._status_badge.remove_css_class("warning")
-        self._status_badge.add_css_class("error")
+        set_status_class(self._status_badge, StatusLevel.ERROR)
 
         self._last_scan_row.set_subtitle("Could not load scan history")
 

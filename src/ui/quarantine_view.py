@@ -29,6 +29,7 @@ from ..core.quarantine import (
 )
 from .pagination import PaginatedListController
 from .utils import add_row_icon
+from .view_helpers import EmptyStateConfig, create_empty_state, create_loading_row
 
 # Backward compatibility constants for tests
 INITIAL_DISPLAY_LIMIT = PaginatedListController.DEFAULT_INITIAL_LIMIT
@@ -238,65 +239,29 @@ class QuarantineView(Gtk.Box):
 
     def _create_empty_state(self) -> Gtk.Widget:
         """Create the empty state placeholder widget."""
-        empty_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        empty_box.set_valign(Gtk.Align.CENTER)
-        empty_box.set_margin_top(48)
-        empty_box.set_margin_bottom(48)
-        empty_box.set_spacing(12)
-
-        # Empty state icon
-        icon = Gtk.Image()
-        icon.set_from_icon_name("shield-safe-symbolic")
-        icon.set_pixel_size(64)
-        icon.add_css_class("dim-label")
-        empty_box.append(icon)
-
-        # Empty state title
-        title = Gtk.Label()
-        title.set_text("No Quarantined Files")
-        title.add_css_class("title-2")
-        title.add_css_class("dim-label")
-        empty_box.append(title)
-
-        # Empty state subtitle
-        subtitle = Gtk.Label()
-        subtitle.set_text("Detected threats will be isolated here for review")
-        subtitle.add_css_class("dim-label")
-        subtitle.add_css_class("caption")
-        empty_box.append(subtitle)
-
-        return empty_box
+        return create_empty_state(
+            EmptyStateConfig(
+                icon_name="shield-safe-symbolic",
+                title="No Quarantined Files",
+                subtitle="Detected threats will be isolated here for review",
+                icon_size=64,
+                margin_vertical=48,
+                title_css_class="title-2",
+            )
+        )
 
     def _create_no_results_state(self) -> Gtk.Widget:
         """Create the no search results placeholder widget."""
-        no_results_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        no_results_box.set_valign(Gtk.Align.CENTER)
-        no_results_box.set_margin_top(48)
-        no_results_box.set_margin_bottom(48)
-        no_results_box.set_spacing(12)
-
-        # No results icon
-        icon = Gtk.Image()
-        icon.set_from_icon_name("edit-find-symbolic")
-        icon.set_pixel_size(64)
-        icon.add_css_class("dim-label")
-        no_results_box.append(icon)
-
-        # No results title
-        title = Gtk.Label()
-        title.set_text("No matching entries")
-        title.add_css_class("title-2")
-        title.add_css_class("dim-label")
-        no_results_box.append(title)
-
-        # No results subtitle
-        subtitle = Gtk.Label()
-        subtitle.set_text("Try a different search term")
-        subtitle.add_css_class("dim-label")
-        subtitle.add_css_class("caption")
-        no_results_box.append(subtitle)
-
-        return no_results_box
+        return create_empty_state(
+            EmptyStateConfig(
+                icon_name="edit-find-symbolic",
+                title="No matching entries",
+                subtitle="Try a different search term",
+                icon_size=64,
+                margin_vertical=48,
+                title_css_class="title-2",
+            )
+        )
 
     def _create_loading_state(self) -> Gtk.ListBoxRow:
         """
@@ -305,31 +270,7 @@ class QuarantineView(Gtk.Box):
         Returns:
             Gtk.ListBoxRow containing spinner and loading text
         """
-        row = Gtk.ListBoxRow()
-        row.set_selectable(False)
-        row.set_activatable(False)
-
-        loading_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
-        loading_box.set_halign(Gtk.Align.CENTER)
-        loading_box.set_valign(Gtk.Align.CENTER)
-        loading_box.set_margin_top(48)
-        loading_box.set_margin_bottom(48)
-        loading_box.set_spacing(12)
-
-        # Loading spinner
-        spinner = Gtk.Spinner()
-        spinner.set_spinning(True)
-        loading_box.append(spinner)
-
-        # Loading message
-        label = Gtk.Label()
-        label.set_text("Loading quarantine entries...")
-        label.add_css_class("dim-label")
-        loading_box.append(label)
-
-        row.set_child(loading_box)
-
-        return row
+        return create_loading_row("Loading quarantine entries...", margin_vertical=48)
 
     def _on_status_banner_dismissed(self, banner):
         """
@@ -433,43 +374,43 @@ class QuarantineView(Gtk.Box):
     @property
     def _displayed_count(self) -> int:
         """Get the current displayed count from pagination controller (backward compatibility)."""
-        return self._pagination.displayed_count if hasattr(self, '_pagination') else 0
+        return self._pagination.displayed_count if hasattr(self, "_pagination") else 0
 
     @_displayed_count.setter
     def _displayed_count(self, value: int):
         """Set the displayed count on pagination controller (backward compatibility)."""
-        if hasattr(self, '_pagination'):
+        if hasattr(self, "_pagination"):
             self._pagination._displayed_count = value
 
     @property
     def _load_more_row(self):
         """Get the load more row from pagination controller (backward compatibility)."""
-        return self._pagination.load_more_row if hasattr(self, '_pagination') else None
+        return self._pagination.load_more_row if hasattr(self, "_pagination") else None
 
     @_load_more_row.setter
     def _load_more_row(self, value):
         """Set the load more row on pagination controller (backward compatibility)."""
-        if hasattr(self, '_pagination'):
+        if hasattr(self, "_pagination"):
             self._pagination._load_more_row = value
 
     def _display_entry_batch(self, start_index: int, count: int):
         """Display a batch of entries (backward compatibility - delegates to pagination controller)."""
-        if hasattr(self, '_pagination'):
+        if hasattr(self, "_pagination"):
             self._pagination.display_batch(start_index, count)
 
     def _add_load_more_button(self, entries_label: str = "entries"):
         """Add load more button (backward compatibility - delegates to pagination controller)."""
-        if hasattr(self, '_pagination'):
+        if hasattr(self, "_pagination"):
             self._pagination.add_load_more_button(entries_label)
 
     def _on_load_more_clicked(self, button):
         """Handle load more button click (backward compatibility - delegates to pagination controller)."""
-        if hasattr(self, '_pagination'):
+        if hasattr(self, "_pagination"):
             self._pagination.load_more()
 
     def _on_show_all_clicked(self, button):
         """Handle show all button click (backward compatibility - delegates to pagination controller)."""
-        if hasattr(self, '_pagination'):
+        if hasattr(self, "_pagination"):
             self._pagination.show_all()
 
     def _on_refresh_clicked(self, button):

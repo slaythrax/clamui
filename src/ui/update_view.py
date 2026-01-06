@@ -12,6 +12,7 @@ from gi.repository import Adw, GLib, Gtk
 from ..core.updater import FreshclamUpdater, UpdateResult, UpdateStatus
 from ..core.utils import check_freshclam_installed
 from .utils import add_row_icon
+from .view_helpers import StatusLevel, set_status_class
 
 
 class UpdateView(Gtk.Box):
@@ -316,24 +317,16 @@ class UpdateView(Gtk.Box):
             self._status_banner.set_title(
                 f"Database updated successfully ({result.databases_updated} database(s) updated)"
             )
-            self._status_banner.add_css_class("success")
-            self._status_banner.remove_css_class("error")
-            self._status_banner.remove_css_class("warning")
+            set_status_class(self._status_banner, StatusLevel.SUCCESS)
         elif result.status == UpdateStatus.UP_TO_DATE:
             self._status_banner.set_title("Database is already up to date")
-            self._status_banner.add_css_class("success")
-            self._status_banner.remove_css_class("error")
-            self._status_banner.remove_css_class("warning")
+            set_status_class(self._status_banner, StatusLevel.SUCCESS)
         elif result.status == UpdateStatus.CANCELLED:
             self._status_banner.set_title("Update cancelled")
-            self._status_banner.add_css_class("warning")
-            self._status_banner.remove_css_class("success")
-            self._status_banner.remove_css_class("error")
+            set_status_class(self._status_banner, StatusLevel.WARNING)
         else:  # ERROR
             self._status_banner.set_title(result.error_message or "Update error occurred")
-            self._status_banner.add_css_class("error")
-            self._status_banner.remove_css_class("success")
-            self._status_banner.remove_css_class("warning")
+            set_status_class(self._status_banner, StatusLevel.ERROR)
 
         self._status_banner.set_revealed(True)
 

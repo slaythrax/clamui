@@ -24,6 +24,7 @@ from ..core.utils import (
 from .profile_dialogs import ProfileListDialog
 from .scan_results_dialog import ScanResultsDialog
 from .utils import add_row_icon
+from .view_helpers import StatusLevel, set_status_class
 
 if TYPE_CHECKING:
     from ..core.settings_manager import SettingsManager
@@ -389,9 +390,7 @@ class ScanView(Gtk.Box):
             message: The error message to display
         """
         self._status_banner.set_title(message)
-        self._status_banner.add_css_class("error")
-        self._status_banner.remove_css_class("success")
-        self._status_banner.remove_css_class("warning")
+        set_status_class(self._status_banner, StatusLevel.ERROR)
         self._status_banner.set_revealed(True)
 
     def _create_profile_section(self):
@@ -860,9 +859,7 @@ class ScanView(Gtk.Box):
         """
         if not self._selected_path:
             self._status_banner.set_title("Please select a file or folder to scan")
-            self._status_banner.add_css_class("warning")
-            self._status_banner.remove_css_class("success")
-            self._status_banner.remove_css_class("error")
+            set_status_class(self._status_banner, StatusLevel.WARNING)
             self._status_banner.set_revealed(True)
             return
 
@@ -897,9 +894,7 @@ class ScanView(Gtk.Box):
         except OSError as e:
             logger.error(f"Failed to create EICAR test file: {e}")
             self._status_banner.set_title(f"Failed to create EICAR test file: {e}")
-            self._status_banner.add_css_class("error")
-            self._status_banner.remove_css_class("success")
-            self._status_banner.remove_css_class("warning")
+            set_status_class(self._status_banner, StatusLevel.ERROR)
             self._status_banner.set_revealed(True)
 
     def _start_scanning(self):
@@ -993,24 +988,18 @@ class ScanView(Gtk.Box):
             self._status_banner.set_title(
                 f"Scan complete - {result.infected_count} threat(s) detected"
             )
-            self._status_banner.add_css_class("warning")
-            self._status_banner.remove_css_class("success")
-            self._status_banner.remove_css_class("error")
+            set_status_class(self._status_banner, StatusLevel.WARNING)
             self._status_banner.set_revealed(True)
         elif result.status == ScanStatus.CLEAN:
             self._show_view_results(0)
             self._status_banner.set_title("Scan complete - No threats found")
-            self._status_banner.add_css_class("success")
-            self._status_banner.remove_css_class("warning")
-            self._status_banner.remove_css_class("error")
+            set_status_class(self._status_banner, StatusLevel.SUCCESS)
             self._status_banner.set_revealed(True)
         elif result.status == ScanStatus.ERROR:
             self._show_view_results(0)
             error_detail = result.error_message or result.stderr or "Unknown error"
             self._status_banner.set_title(f"Scan error: {error_detail}")
-            self._status_banner.add_css_class("error")
-            self._status_banner.remove_css_class("success")
-            self._status_banner.remove_css_class("warning")
+            set_status_class(self._status_banner, StatusLevel.ERROR)
             self._status_banner.set_revealed(True)
             logger.error(
                 f"Scan failed: {error_detail}, stdout={result.stdout!r}, stderr={result.stderr!r}"
@@ -1018,9 +1007,7 @@ class ScanView(Gtk.Box):
         else:
             self._show_view_results(0)
             self._status_banner.set_title(f"Scan completed with status: {result.status.value}")
-            self._status_banner.add_css_class("warning")
-            self._status_banner.remove_css_class("success")
-            self._status_banner.remove_css_class("error")
+            set_status_class(self._status_banner, StatusLevel.WARNING)
             self._status_banner.set_revealed(True)
 
     def _on_scan_error(self, error_msg: str):
@@ -1051,9 +1038,7 @@ class ScanView(Gtk.Box):
             self._on_scan_state_changed(self._is_scanning)
 
         self._status_banner.set_title(f"Scan error: {error_msg}")
-        self._status_banner.add_css_class("error")
-        self._status_banner.remove_css_class("success")
-        self._status_banner.remove_css_class("warning")
+        set_status_class(self._status_banner, StatusLevel.ERROR)
         self._status_banner.set_revealed(True)
 
     def _create_backend_indicator(self):
