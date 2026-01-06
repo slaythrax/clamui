@@ -253,39 +253,69 @@ class TestFreshclamUpdaterBuildCommand:
     """Tests for FreshclamUpdater._build_command()."""
 
     def test_build_command_with_pkexec(self, updater_module):
-        """Test command includes pkexec when available."""
+        """Test command includes pkexec when available (non-Flatpak)."""
         FreshclamUpdater = updater_module["FreshclamUpdater"]
-        with patch("src.core.updater.get_freshclam_path", return_value="/usr/bin/freshclam"):
-            with patch("src.core.updater.get_pkexec_path", return_value="/usr/bin/pkexec"):
-                with patch("src.core.updater.wrap_host_command", side_effect=lambda x: x):
-                    updater = FreshclamUpdater(log_manager=MagicMock())
-                    cmd = updater._build_command()
-                    assert cmd[0] == "/usr/bin/pkexec"
-                    assert cmd[1] == "/usr/bin/freshclam"
-                    assert "--verbose" in cmd
+        with patch("src.core.updater.is_flatpak", return_value=False):
+            with patch("src.core.updater.get_freshclam_path", return_value="/usr/bin/freshclam"):
+                with patch("src.core.updater.get_pkexec_path", return_value="/usr/bin/pkexec"):
+                    with patch("src.core.updater.wrap_host_command", side_effect=lambda x: x):
+                        updater = FreshclamUpdater(log_manager=MagicMock())
+                        cmd = updater._build_command()
+                        assert cmd[0] == "/usr/bin/pkexec"
+                        assert cmd[1] == "/usr/bin/freshclam"
+                        assert "--verbose" in cmd
 
     def test_build_command_without_pkexec(self, updater_module):
-        """Test command uses freshclam directly when pkexec not available."""
+        """Test command uses freshclam directly when pkexec not available (non-Flatpak)."""
         FreshclamUpdater = updater_module["FreshclamUpdater"]
-        with patch("src.core.updater.get_freshclam_path", return_value="/usr/bin/freshclam"):
-            with patch("src.core.updater.get_pkexec_path", return_value=None):
-                with patch("src.core.updater.wrap_host_command", side_effect=lambda x: x):
-                    updater = FreshclamUpdater(log_manager=MagicMock())
-                    cmd = updater._build_command()
-                    assert cmd[0] == "/usr/bin/freshclam"
-                    assert "--verbose" in cmd
+        with patch("src.core.updater.is_flatpak", return_value=False):
+            with patch("src.core.updater.get_freshclam_path", return_value="/usr/bin/freshclam"):
+                with patch("src.core.updater.get_pkexec_path", return_value=None):
+                    with patch("src.core.updater.wrap_host_command", side_effect=lambda x: x):
+                        updater = FreshclamUpdater(log_manager=MagicMock())
+                        cmd = updater._build_command()
+                        assert cmd[0] == "/usr/bin/freshclam"
+                        assert "--verbose" in cmd
 
     def test_build_command_uses_wrap_host_command(self, updater_module):
         """Test command is wrapped for Flatpak compatibility."""
         FreshclamUpdater = updater_module["FreshclamUpdater"]
-        with patch("src.core.updater.get_freshclam_path", return_value="freshclam"):
-            with patch("src.core.updater.get_pkexec_path", return_value=None):
-                with patch("src.core.updater.wrap_host_command") as mock_wrap:
-                    mock_wrap.return_value = ["flatpak-spawn", "--host", "freshclam", "--verbose"]
-                    updater = FreshclamUpdater(log_manager=MagicMock())
-                    cmd = updater._build_command()
-                    mock_wrap.assert_called_once()
-                    assert cmd[0] == "flatpak-spawn"
+        with patch("src.core.updater.is_flatpak", return_value=False):
+            with patch("src.core.updater.get_freshclam_path", return_value="freshclam"):
+                with patch("src.core.updater.get_pkexec_path", return_value=None):
+                    with patch("src.core.updater.wrap_host_command") as mock_wrap:
+                        mock_wrap.return_value = [
+                            "flatpak-spawn",
+                            "--host",
+                            "freshclam",
+                            "--verbose",
+                        ]
+                        updater = FreshclamUpdater(log_manager=MagicMock())
+                        cmd = updater._build_command()
+                        mock_wrap.assert_called_once()
+                        assert cmd[0] == "flatpak-spawn"
+
+    def test_build_command_flatpak_uses_config_file(self, updater_module, tmp_path):
+        """Test Flatpak mode uses generated config file without pkexec."""
+        FreshclamUpdater = updater_module["FreshclamUpdater"]
+        config_path = tmp_path / "freshclam.conf"
+        # Create the config file since the code checks if it exists
+        config_path.write_text("# test config")
+        with patch("src.core.updater.is_flatpak", return_value=True):
+            with patch("src.core.updater.get_freshclam_path", return_value="/app/bin/freshclam"):
+                with patch("src.core.updater.ensure_clamav_database_dir"):
+                    with patch(
+                        "src.core.updater.ensure_freshclam_config", return_value=config_path
+                    ):
+                        with patch("src.core.updater.wrap_host_command", side_effect=lambda x: x):
+                            updater = FreshclamUpdater(log_manager=MagicMock())
+                            cmd = updater._build_command()
+                            # Should use freshclam directly (no pkexec in Flatpak)
+                            assert cmd[0] == "/app/bin/freshclam"
+                            # Should include config file
+                            assert "--config-file" in cmd
+                            assert str(config_path) in cmd
+                            assert "--verbose" in cmd
 
 
 # =============================================================================

@@ -29,6 +29,7 @@ logger = logging.getLogger(__name__)
 _TERMINATE_GRACE_TIMEOUT = 5  # Time to wait after SIGTERM before SIGKILL
 _KILL_WAIT_TIMEOUT = 2  # Time to wait after SIGKILL
 
+from .flatpak import get_clamav_database_dir, is_flatpak
 from .settings_manager import SettingsManager
 from .threat_classifier import (
     categorize_threat,
@@ -173,7 +174,15 @@ class Scanner:
         self._daemon_scanner: DaemonScanner | None = None
 
     def _get_backend(self) -> str:
-        """Get the configured scan backend."""
+        """Get the configured scan backend.
+
+        In Flatpak mode, always returns "clamscan" because the bundled
+        clamdscan cannot connect to the host's clamd socket from inside
+        the sandbox.
+        """
+        # Flatpak only supports standalone clamscan (no daemon access)
+        if is_flatpak():
+            return "clamscan"
         if self._settings_manager:
             return self._settings_manager.get("scan_backend", "auto")
         return "auto"
@@ -492,6 +501,11 @@ class Scanner:
         """
         clamscan = get_clamav_path() or "clamscan"
         cmd = [clamscan]
+
+        # In Flatpak, specify the database directory (user-writable location)
+        db_dir = get_clamav_database_dir()
+        if db_dir is not None:
+            cmd.extend(["--database", str(db_dir)])
 
         # Add recursive flag for directories
         if recursive and Path(path).is_dir():

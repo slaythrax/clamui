@@ -1,0 +1,7 @@
+[Nemo Action]
+Name=Scan with ClamUI
+Comment=Scan selected files/folders with ClamUI antivirus
+Exec=flatpak run io.github.Pdzly.ClamUI %F
+Icon-Name=io.github.Pdzly.ClamUI
+Selection=any
+Extensions=any;

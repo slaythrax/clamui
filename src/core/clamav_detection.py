@@ -12,7 +12,12 @@ This module provides functions for:
 import os
 import subprocess
 
-from .flatpak import is_flatpak, which_host_command, wrap_host_command
+from .flatpak import (
+    ensure_freshclam_config,
+    is_flatpak,
+    which_host_command,
+    wrap_host_command,
+)
 
 
 def check_clamav_installed() -> tuple[bool, str | None]:
@@ -70,10 +75,17 @@ def check_freshclam_installed() -> tuple[bool, str | None]:
             "freshclam is not installed. Please install it with: sudo apt install clamav-freshclam",
         )
 
+    # Build command - in Flatpak, bundled freshclam needs config file even for --version
+    cmd = ["freshclam", "--version"]
+    if is_flatpak():
+        config_path = ensure_freshclam_config()
+        if config_path is not None and config_path.exists():
+            cmd = ["freshclam", "--config-file", str(config_path), "--version"]
+
     # Try to get version to verify it's working
     try:
         result = subprocess.run(
-            wrap_host_command(["freshclam", "--version"]),
+            wrap_host_command(cmd),
             capture_output=True,
             text=True,
             timeout=10,

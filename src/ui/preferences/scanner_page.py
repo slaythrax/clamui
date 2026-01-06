@@ -14,6 +14,7 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Adw, Gtk
 
+from src.core.flatpak import is_flatpak
 from src.ui.utils import add_row_icon
 
 from .base import PreferencesPageMixin
@@ -109,6 +110,9 @@ class ScannerPage(PreferencesPageMixin):
         - Daemon: Use clamd daemon only (faster, requires daemon running)
         - Clamscan: Use standalone clamscan only
 
+        In Flatpak mode, only clamscan is available (daemon cannot be accessed
+        from inside the sandbox), so a simplified informational view is shown.
+
         This group auto-saves changes immediately to settings.
 
         Args:
@@ -117,10 +121,49 @@ class ScannerPage(PreferencesPageMixin):
             settings_manager: SettingsManager for auto-saving backend selection
             helper: Helper instance with _create_permission_indicator method
         """
+        group = Adw.PreferencesGroup()
+        group.set_title("Scan Backend")
+
+        # In Flatpak, only clamscan is supported - show informational view
+        if is_flatpak():
+            group.set_description(
+                "Flatpak uses the bundled standalone scanner for reliable, self-contained operation."
+            )
+
+            # Show current backend (always clamscan in Flatpak)
+            backend_row = Adw.ActionRow()
+            backend_row.set_title("Scan Backend")
+            backend_row.set_subtitle("Standalone Scanner (clamscan) — Bundled with Flatpak")
+            add_row_icon(backend_row, "security-high-symbolic")
+
+            # Add info badge
+            info_badge = Gtk.Label()
+            info_badge.set_text("Flatpak")
+            info_badge.add_css_class("dim-label")
+            info_badge.add_css_class("caption")
+            backend_row.add_suffix(info_badge)
+
+            group.add(backend_row)
+
+            # Info about why daemon is not available
+            info_row = Adw.ActionRow()
+            info_row.set_title("Daemon Scanner")
+            info_row.set_subtitle("Not available in Flatpak (sandbox restriction)")
+            add_row_icon(info_row, "dialog-information-symbolic")
+
+            unavailable_label = Gtk.Label()
+            unavailable_label.set_text("N/A")
+            unavailable_label.add_css_class("dim-label")
+            info_row.add_suffix(unavailable_label)
+
+            group.add(info_row)
+
+            page.add(group)
+            return
+
+        # Native installation - show full backend selection UI
         from src.core.utils import check_clamd_connection
 
-        group = Adw.PreferencesGroup()
-        group.set_title("Scan Backend (Auto-Saved)")
         group.set_description("Select how ClamUI performs scans. Auto-saved.")
 
         # Scan backend dropdown

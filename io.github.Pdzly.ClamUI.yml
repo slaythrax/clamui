@@ -31,6 +31,9 @@ finish-args:
   # GVFS for file browser integration
   - --filesystem=xdg-run/gvfsd
 
+  # Nemo actions directory (for context menu integration)
+  - --filesystem=~/.local/share/nemo/actions:create
+
 modules:
   # System tray indicator support (AyatanaAppIndicator3)
   - shared-modules/libayatana-appindicator/libayatana-appindicator-gtk3.json
@@ -149,6 +152,10 @@ modules:
       - install -Dm644 io.github.Pdzly.ClamUI.metainfo.xml /app/share/metainfo/io.github.Pdzly.ClamUI.metainfo.xml
       - install -Dm644 icons/io.github.Pdzly.ClamUI.svg /app/share/icons/hicolor/scalable/apps/io.github.Pdzly.ClamUI.svg
       - install -Dm644 icons/io.github.Pdzly.ClamUI.png /app/share/icons/hicolor/scalable/apps/io.github.Pdzly.ClamUI.png
+      # Nemo context menu actions (for Cinnamon/Nemo file manager)
+      - install -Dm644 io.github.Pdzly.ClamUI.flatpak.nemo_action /app/share/clamui/nemo-actions/io.github.Pdzly.ClamUI.nemo_action
+      - install -Dm644 io.github.Pdzly.ClamUI-virustotal.flatpak.nemo_action /app/share/clamui/nemo-actions/io.github.Pdzly.ClamUI-virustotal.nemo_action
+      - install -Dm755 scripts/install-nemo-actions.sh /app/bin/clamui-install-nemo-actions
     sources:
       - type: dir
         path: .

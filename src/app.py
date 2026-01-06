@@ -220,6 +220,66 @@ class ClamUIApp(Adw.Application):
         # Initialize tray indicator if available
         self._setup_tray_indicator()
 
+        # Ensure ClamAV database directory exists in Flatpak
+        self._ensure_clamav_database_dir()
+
+        # Install Nemo context menu actions if running in Flatpak
+        self._install_nemo_actions()
+
+    def _install_nemo_actions(self):
+        """
+        Install Nemo context menu actions if running in Flatpak.
+
+        Copies the nemo action files from the Flatpak to the user's
+        local Nemo actions directory for context menu integration.
+        """
+        # Only run in Flatpak environment
+        if not os.path.exists("/.flatpak-info"):
+            return
+
+        source_dir = Path("/app/share/clamui/nemo-actions")
+        dest_dir = (
+            Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local/share")) / "nemo/actions"
+        )
+
+        # Check if source directory exists
+        if not source_dir.exists():
+            return
+
+        try:
+            # Create destination directory if needed
+            dest_dir.mkdir(parents=True, exist_ok=True)
+
+            # Copy action files if they don't exist or are outdated
+            for action_file in source_dir.glob("*.nemo_action"):
+                dest_file = dest_dir / action_file.name
+                # Always update to ensure latest version
+                if not dest_file.exists():
+                    import shutil
+
+                    shutil.copy2(action_file, dest_file)
+                    logging.info(f"Installed Nemo action: {action_file.name}")
+        except Exception as e:
+            logging.warning(f"Failed to install Nemo actions: {e}")
+
+    def _ensure_clamav_database_dir(self):
+        """
+        Ensure ClamAV database directory exists in Flatpak.
+
+        In Flatpak, the ClamAV databases need to be stored in a user-writable
+        location since /app is read-only. This method creates the database
+        directory on first run.
+        """
+        # Only run in Flatpak environment
+        if not os.path.exists("/.flatpak-info"):
+            return
+
+        from .core.flatpak import ensure_clamav_database_dir
+
+        db_dir = ensure_clamav_database_dir()
+        if db_dir is not None:
+            logger.info(f"ClamAV database directory: {db_dir}")
+
     def _setup_actions(self):
         """Set up application-level actions."""
         # Quit action

@@ -45,14 +45,35 @@ _setup_path()
 from src.app import ClamUIApp
 
 
+def uri_to_path(uri: str) -> str:
+    """
+    Convert a file:// URI to a local filesystem path.
+
+    Handles both file:// URIs (from Flatpak/portal) and regular paths.
+
+    Args:
+        uri: A file:// URI or regular filesystem path.
+
+    Returns:
+        The filesystem path.
+    """
+    from urllib.parse import unquote, urlparse
+
+    if uri.startswith("file://"):
+        parsed = urlparse(uri)
+        # Decode percent-encoded characters (e.g., %20 -> space)
+        return unquote(parsed.path)
+    return uri
+
+
 def parse_arguments(argv: list[str]) -> tuple[list[str], bool, list[str]]:
     """
     Parse command line arguments for file paths and VirusTotal flag.
 
     This function extracts file and folder paths from the command line
     arguments, typically passed from file manager context menu actions
-    via the %F field code in desktop files. It also checks for the
-    --virustotal flag to enable VirusTotal scanning.
+    via the %U field code in desktop files. It handles both file:// URIs
+    (used by Flatpak/portal) and regular filesystem paths.
 
     Args:
         argv: Command line arguments (sys.argv).
@@ -77,13 +98,14 @@ def parse_arguments(argv: list[str]) -> tuple[list[str], bool, list[str]]:
     parser.add_argument(
         "files",
         nargs="*",
-        help="Files or directories to scan",
+        help="Files or directories to scan (paths or file:// URIs)",
     )
 
     # Parse only known args to allow GTK to process its own arguments
     args, unknown_args = parser.parse_known_args(argv[1:])
 
-    file_paths = args.files if args.files else []
+    # Convert URIs to paths (handles both file:// URIs and regular paths)
+    file_paths = [uri_to_path(f) for f in args.files] if args.files else []
 
     if file_paths:
         # Log received file paths for debugging context menu integration

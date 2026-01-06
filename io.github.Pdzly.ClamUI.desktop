@@ -3,19 +3,10 @@ Type=Application
 Name=ClamUI
 GenericName=Antivirus Scanner
 Comment=A graphical interface for ClamAV antivirus
-Exec=clamui %F
+Exec=clamui %U
 Icon=io.github.Pdzly.ClamUI
 Terminal=false
 Categories=GTK;Utility;Security;
 Keywords=antivirus;virus;scanner;clamav;security;malware;virustotal;
 StartupNotify=true
-MimeType=inode/directory;application/octet-stream;
-Actions=ScanFile;ScanVirusTotal;
-
-[Desktop Action ScanFile]
-Name=Scan with ClamUI
-Exec=clamui %F
-
-[Desktop Action ScanVirusTotal]
-Name=Scan with VirusTotal
-Exec=clamui --virustotal %F
+NoDisplay=false

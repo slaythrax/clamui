@@ -9,6 +9,7 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Adw, GLib, Gtk
 
+from ..core.flatpak import is_flatpak
 from ..core.log_manager import DaemonStatus, LogManager
 from ..core.utils import (
     check_clamav_installed,
@@ -158,12 +159,16 @@ class ComponentsView(Gtk.Box):
         self._create_component_row(
             components_group, "freshclam", "Database Updater", "software-update-available-symbolic"
         )
-        self._create_component_row(
-            components_group, "clamdscan", "Daemon Scanner Client", "network-server-symbolic"
-        )
-        self._create_component_row(
-            components_group, "clamd", "Scanner Daemon", "system-run-symbolic"
-        )
+
+        # Only show daemon-related components for native installations
+        # In Flatpak, the daemon cannot be accessed from inside the sandbox
+        if not is_flatpak():
+            self._create_component_row(
+                components_group, "clamdscan", "Daemon Scanner Client", "network-server-symbolic"
+            )
+            self._create_component_row(
+                components_group, "clamd", "Scanner Daemon", "system-run-symbolic"
+            )
 
         scrolled.set_child(components_group)
         self.append(scrolled)
@@ -385,13 +390,16 @@ class ComponentsView(Gtk.Box):
         is_installed, version_or_error = check_freshclam_installed()
         self._update_component_status("freshclam", is_installed, version_or_error)
 
-        # Check clamdscan
-        is_installed, version_or_error = check_clamdscan_installed()
-        self._update_component_status("clamdscan", is_installed, version_or_error)
+        # Only check daemon-related components for native installations
+        # In Flatpak, the daemon cannot be accessed from inside the sandbox
+        if not is_flatpak():
+            # Check clamdscan
+            is_installed, version_or_error = check_clamdscan_installed()
+            self._update_component_status("clamdscan", is_installed, version_or_error)
 
-        # Check clamd daemon
-        daemon_status, daemon_message = self._log_manager.get_daemon_status()
-        self._update_daemon_status("clamd", daemon_status, daemon_message)
+            # Check clamd daemon
+            daemon_status, daemon_message = self._log_manager.get_daemon_status()
+            self._update_daemon_status("clamd", daemon_status, daemon_message)
 
         # Reset checking state
         self._set_checking_state(False)

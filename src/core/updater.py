@@ -13,6 +13,11 @@ from enum import Enum
 
 from gi.repository import GLib
 
+from .flatpak import (
+    ensure_clamav_database_dir,
+    ensure_freshclam_config,
+    is_flatpak,
+)
 from .log_manager import LogEntry, LogManager
 from .utils import check_freshclam_installed, get_freshclam_path, wrap_host_command
 
@@ -298,6 +303,9 @@ class FreshclamUpdater:
         Uses pkexec for privilege elevation since freshclam requires
         root access to update the ClamAV database in /var/lib/clamav/.
 
+        In Flatpak, databases are stored in user-writable directory so
+        no privilege elevation is needed.
+
         When running inside a Flatpak sandbox, the command is automatically
         wrapped with 'flatpak-spawn --host' to execute freshclam on the host system.
 
@@ -305,14 +313,36 @@ class FreshclamUpdater:
             List of command arguments (wrapped with flatpak-spawn if in Flatpak)
         """
         freshclam = get_freshclam_path() or "freshclam"
-        pkexec = get_pkexec_path()
 
-        # Use pkexec for privilege elevation (required for database updates)
-        if pkexec:
-            cmd = [pkexec, freshclam]
-        else:
-            # Fallback to running without elevation (may fail with permission error)
+        # In Flatpak, use user-writable database directory (no root needed)
+        if is_flatpak():
+            # Ensure the database directory exists
+            db_dir = ensure_clamav_database_dir()
+            logger.debug("Flatpak database directory: %s", db_dir)
+
+            # Generate config file with correct DatabaseDirectory
+            config_path = ensure_freshclam_config()
+            logger.debug("Flatpak config path: %s", config_path)
+
             cmd = [freshclam]
+            if config_path is not None and config_path.exists():
+                cmd.extend(["--config-file", str(config_path)])
+            else:
+                # Config generation failed - log error but continue
+                # freshclam will fail with its own error message
+                logger.error(
+                    "Failed to generate freshclam config. Config path: %s, exists: %s",
+                    config_path,
+                    config_path.exists() if config_path else False,
+                )
+        else:
+            # Native: Use pkexec for privilege elevation
+            pkexec = get_pkexec_path()
+            if pkexec:
+                cmd = [pkexec, freshclam]
+            else:
+                # Fallback to running without elevation (may fail with permission error)
+                cmd = [freshclam]
 
         # Add verbose flag for more detailed output
         cmd.append("--verbose")
