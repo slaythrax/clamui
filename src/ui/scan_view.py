@@ -67,8 +67,8 @@ class ScanView(Gtk.Box):
         # Initialize quarantine manager
         self._quarantine_manager = QuarantineManager()
 
-        # Current selected path
-        self._selected_path: str = ""
+        # Current selected paths (supports multiple targets)
+        self._selected_paths: list[str] = []
 
         # Scanning state
         self._is_scanning = False
@@ -659,12 +659,9 @@ class ScanView(Gtk.Box):
         dialog.set_title("Select File to Scan")
 
         # Set initial folder if a path is already selected
-        if self._selected_path:
-            parent_dir = (
-                os.path.dirname(self._selected_path)
-                if os.path.isfile(self._selected_path)
-                else self._selected_path
-            )
+        if self._selected_paths:
+            first_path = self._selected_paths[0]
+            parent_dir = os.path.dirname(first_path) if os.path.isfile(first_path) else first_path
             if os.path.isdir(parent_dir):
                 dialog.set_initial_folder(Gio.File.new_for_path(parent_dir))
 
@@ -697,12 +694,9 @@ class ScanView(Gtk.Box):
         dialog.set_title("Select Folder to Scan")
 
         # Set initial folder if a path is already selected
-        if self._selected_path:
-            initial_dir = (
-                self._selected_path
-                if os.path.isdir(self._selected_path)
-                else os.path.dirname(self._selected_path)
-            )
+        if self._selected_paths:
+            first_path = self._selected_paths[0]
+            initial_dir = first_path if os.path.isdir(first_path) else os.path.dirname(first_path)
             if os.path.isdir(initial_dir):
                 dialog.set_initial_folder(Gio.File.new_for_path(initial_dir))
 
@@ -720,33 +714,106 @@ class ScanView(Gtk.Box):
 
     def _set_selected_path(self, path: str):
         """
-        Set the selected path and update the UI.
+        Set a single selected path, replacing any existing selection.
+
+        This is a convenience method that clears the current selection
+        and adds a single path. For adding multiple paths, use _add_path().
 
         Args:
             path: The file or folder path to scan
         """
-        self._selected_path = path
-        formatted_path = format_scan_path(path)
-        self._path_label.set_label(formatted_path)
+        self._clear_paths()
+        self._add_path(path)
 
-        # Check if this is a portal path that couldn't be fully resolved
-        if formatted_path.startswith("[Portal]"):
-            self._path_label.set_tooltip_text(
-                "The exact location cannot be displayed in Flatpak mode, "
-                "but scanning will work normally."
-            )
-            # Update subtitle to indicate portal access
-            if os.path.isdir(path):
-                self._path_row.set_subtitle("Folder selected (via Flatpak portal)")
+    def _add_path(self, path: str) -> bool:
+        """
+        Add a path to the selection if not already present.
+
+        Args:
+            path: The file or folder path to add
+
+        Returns:
+            True if the path was added, False if it was a duplicate
+        """
+        # Normalize path for comparison
+        normalized = os.path.normpath(path)
+        if normalized in [os.path.normpath(p) for p in self._selected_paths]:
+            return False
+
+        self._selected_paths.append(path)
+        self._update_path_display()
+        return True
+
+    def _remove_path(self, path: str) -> bool:
+        """
+        Remove a path from the selection.
+
+        Args:
+            path: The file or folder path to remove
+
+        Returns:
+            True if the path was removed, False if it wasn't in the list
+        """
+        normalized = os.path.normpath(path)
+        for i, existing in enumerate(self._selected_paths):
+            if os.path.normpath(existing) == normalized:
+                self._selected_paths.pop(i)
+                self._update_path_display()
+                return True
+        return False
+
+    def _clear_paths(self):
+        """Clear all selected paths."""
+        self._selected_paths.clear()
+        self._update_path_display()
+
+    def get_selected_paths(self) -> list[str]:
+        """
+        Get the list of currently selected paths.
+
+        Returns:
+            A copy of the selected paths list
+        """
+        return self._selected_paths.copy()
+
+    def _update_path_display(self):
+        """Update the UI to reflect the current path selection."""
+        path_count = len(self._selected_paths)
+
+        if path_count == 0:
+            self._path_label.set_label("")
+            self._path_label.set_tooltip_text("")
+            self._path_row.set_subtitle("Drop files here or select on the right")
+        elif path_count == 1:
+            path = self._selected_paths[0]
+            formatted_path = format_scan_path(path)
+            self._path_label.set_label(formatted_path)
+
+            # Check if this is a portal path that couldn't be fully resolved
+            if formatted_path.startswith("[Portal]"):
+                self._path_label.set_tooltip_text(
+                    "The exact location cannot be displayed in Flatpak mode, "
+                    "but scanning will work normally."
+                )
+                # Update subtitle to indicate portal access
+                if os.path.isdir(path):
+                    self._path_row.set_subtitle("Folder selected (via Flatpak portal)")
+                else:
+                    self._path_row.set_subtitle("File selected (via Flatpak portal)")
             else:
-                self._path_row.set_subtitle("File selected (via Flatpak portal)")
+                self._path_label.set_tooltip_text(path)
+                # Update subtitle to show path type
+                if os.path.isdir(path):
+                    self._path_row.set_subtitle("Folder selected")
+                else:
+                    self._path_row.set_subtitle("File selected")
         else:
-            self._path_label.set_tooltip_text(path)
-            # Update subtitle to show path type
-            if os.path.isdir(path):
-                self._path_row.set_subtitle("Folder selected")
-            else:
-                self._path_row.set_subtitle("File selected")
+            # Multiple paths selected
+            self._path_label.set_label(f"{path_count} items selected")
+            # Build tooltip with all paths
+            tooltip_lines = [format_scan_path(p) for p in self._selected_paths]
+            self._path_label.set_tooltip_text("\n".join(tooltip_lines))
+            self._path_row.set_subtitle(f"{path_count} files/folders selected")
 
     def _create_scan_section(self):
         """Create the scan control section."""
@@ -900,7 +967,7 @@ class ScanView(Gtk.Box):
         Args:
             button: The Gtk.Button that was clicked
         """
-        if not self._selected_path:
+        if not self._selected_paths:
             self._status_banner.set_title("Please select a file or folder to scan")
             set_status_class(self._status_banner, StatusLevel.WARNING)
             self._status_banner.set_revealed(True)
@@ -929,7 +996,7 @@ class ScanView(Gtk.Box):
                 self._eicar_temp_path = f.name
 
             # Set the EICAR file as scan target and start scan
-            self._selected_path = self._eicar_temp_path
+            self._set_selected_path(self._eicar_temp_path)
             self._path_label.set_label("EICAR Test File")
             self._path_row.set_subtitle("Testing antivirus detection")
             self._start_scanning()
@@ -957,10 +1024,14 @@ class ScanView(Gtk.Box):
         # Show progress section with status message
         if self._progress_section is not None:
             # Format path for display (handles Flatpak portal paths and truncation)
-            display_path = format_scan_path(self._selected_path)
-            if len(display_path) > 50:
-                display_path = "..." + display_path[-47:]
-            self._progress_label.set_label(f"Scanning {display_path}")
+            path_count = len(self._selected_paths)
+            if path_count == 1:
+                display_path = format_scan_path(self._selected_paths[0])
+                if len(display_path) > 50:
+                    display_path = "..." + display_path[-47:]
+                self._progress_label.set_label(f"Scanning {display_path}")
+            else:
+                self._progress_label.set_label(f"Scanning {path_count} items...")
             self._progress_section.set_visible(True)
             self._start_progress_pulse()
 
@@ -984,9 +1055,22 @@ class ScanView(Gtk.Box):
         Perform the actual scan.
 
         This runs in a background thread to avoid blocking the UI.
+        Currently scans the first selected path. Multi-path scanning
+        will be implemented when the scanner backend is updated.
         """
         try:
-            result = self._scanner.scan_sync(self._selected_path)
+            # TODO: Update to support multi-path scanning when scanner is modified
+            # For now, scan the first path
+            if self._selected_paths:
+                result = self._scanner.scan_sync(self._selected_paths[0])
+            else:
+                # Should not happen, but handle gracefully
+                from ..core.scanner import ScanResult, ScanStatus
+
+                result = ScanResult(
+                    status=ScanStatus.ERROR,
+                    error_message="No paths selected for scanning",
+                )
             # Schedule UI update on main thread
             GLib.idle_add(self._on_scan_complete, result)
         except Exception as e:
