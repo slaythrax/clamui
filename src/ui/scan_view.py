@@ -565,6 +565,8 @@ class ScanView(Gtk.Box):
         if root is not None and isinstance(root, Gtk.Window):
             profile_manager = self._get_profile_manager()
             dialog = ProfileListDialog(profile_manager=profile_manager)
+            # Set callback for when a profile is selected to run
+            dialog.set_on_profile_selected(self._on_profile_run_from_dialog)
             # Refresh profiles when dialog is closed
             dialog.connect("closed", self._on_profiles_dialog_closed)
             dialog.present(root)
@@ -579,6 +581,22 @@ class ScanView(Gtk.Box):
             dialog: The ProfileListDialog that was closed
         """
         self.refresh_profiles()
+
+    def _on_profile_run_from_dialog(self, profile: "ScanProfile"):
+        """
+        Handle profile selection from manage profiles dialog.
+
+        Selects the profile in the dropdown and starts the scan.
+
+        Args:
+            profile: The ScanProfile that was selected to run
+        """
+        # Refresh profiles first to ensure the list is up to date
+        self.refresh_profiles()
+        # Select the profile in the dropdown
+        self.set_selected_profile(profile.id)
+        # Start the scan with the selected profile
+        self._start_scan()
 
     def _create_selection_section(self):
         """Create the file/folder selection UI section."""

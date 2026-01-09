@@ -15,15 +15,16 @@ from pathlib import Path
 
 from gi.repository import GLib
 
-from .log_manager import LogEntry, LogManager
-
-logger = logging.getLogger(__name__)
-
-# Timeout constants (seconds)
-_TERMINATE_GRACE_TIMEOUT = 5  # Time to wait after SIGTERM before SIGKILL
-_KILL_WAIT_TIMEOUT = 2  # Time to wait after SIGKILL
-
-from .scanner import ScanResult, ScanStatus, ThreatDetail
+from .log_manager import LogManager
+from .scanner_base import (
+    cleanup_process,
+    communicate_with_cancel_check,
+    create_cancelled_result,
+    create_error_result,
+    save_scan_log,
+    terminate_process_gracefully,
+)
+from .scanner_types import ScanResult, ScanStatus, ThreatDetail
 from .settings_manager import SettingsManager
 from .threat_classifier import (
     categorize_threat,
@@ -37,6 +38,8 @@ from .utils import (
     which_host_command,
     wrap_host_command,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class DaemonScanner:
@@ -114,67 +117,27 @@ class DaemonScanner:
         # Validate the path first
         is_valid, error = validate_path(path)
         if not is_valid:
-            result = ScanResult(
-                status=ScanStatus.ERROR,
-                path=path,
-                stdout="",
-                stderr=error or "Invalid path",
-                exit_code=-1,
-                infected_files=[],
-                scanned_files=0,
-                scanned_dirs=0,
-                infected_count=0,
-                error_message=error,
-                threat_details=[],
-            )
-            duration = time.monotonic() - start_time
-            self._save_scan_log(result, duration)
+            result = create_error_result(path, error or "Invalid path")
+            self._save_scan_log(result, time.monotonic() - start_time)
             return result
 
         # Check daemon is available
         is_available, error_msg = self.check_available()
         if not is_available:
-            result = ScanResult(
-                status=ScanStatus.ERROR,
-                path=path,
-                stdout="",
-                stderr=error_msg or "Daemon not available",
-                exit_code=-1,
-                infected_files=[],
-                scanned_files=0,
-                scanned_dirs=0,
-                infected_count=0,
-                error_message=error_msg,
-                threat_details=[],
-            )
-            duration = time.monotonic() - start_time
-            self._save_scan_log(result, duration)
+            result = create_error_result(path, error_msg or "Daemon not available")
+            self._save_scan_log(result, time.monotonic() - start_time)
             return result
 
         # Count files/directories before scanning (clamdscan doesn't report these)
         # Skip counting if count_targets is False for performance on large directories
-        if count_targets:
-            file_count, dir_count = self._count_scan_targets(path, profile_exclusions)
-        else:
-            file_count, dir_count = 0, 0
+        file_count, dir_count = (
+            self._count_scan_targets(path, profile_exclusions) if count_targets else (0, 0)
+        )
 
         # Check if cancelled during counting phase
         if self._scan_cancelled:
-            result = ScanResult(
-                status=ScanStatus.CANCELLED,
-                path=path,
-                stdout="",
-                stderr="",
-                exit_code=-1,
-                infected_files=[],
-                scanned_files=0,
-                scanned_dirs=0,
-                infected_count=0,
-                error_message="Scan cancelled by user",
-                threat_details=[],
-            )
-            duration = time.monotonic() - start_time
-            self._save_scan_log(result, duration)
+            result = create_cancelled_result(path)
+            self._save_scan_log(result, time.monotonic() - start_time)
             return result
 
         # Build clamdscan command
@@ -188,39 +151,27 @@ class DaemonScanner:
             )
 
             try:
-                stdout, stderr, was_cancelled = self._communicate_with_cancel_check(
-                    self._current_process
+                stdout, stderr, was_cancelled = communicate_with_cancel_check(
+                    self._current_process, lambda: self._scan_cancelled
                 )
                 exit_code = self._current_process.returncode
             finally:
                 # Ensure process is cleaned up even if communicate() raises
                 process = self._current_process
-                if process is not None:
-                    self._current_process = None  # Clear first to avoid race
-                    try:
-                        if process.poll() is None:  # Only kill if still running
-                            process.kill()
-                        process.wait(timeout=_KILL_WAIT_TIMEOUT)
-                    except (OSError, ProcessLookupError, subprocess.TimeoutExpired):
-                        pass
+                self._current_process = None  # Clear first to avoid race
+                cleanup_process(process)
 
             # Check if cancelled during execution
             if was_cancelled:
-                result = ScanResult(
-                    status=ScanStatus.CANCELLED,
-                    path=path,
-                    stdout=stdout,
-                    stderr=stderr,
-                    exit_code=exit_code if exit_code is not None else -1,
-                    infected_files=[],
-                    scanned_files=file_count,
-                    scanned_dirs=dir_count,
-                    infected_count=0,
-                    error_message="Scan cancelled by user",
-                    threat_details=[],
+                result = create_cancelled_result(
+                    path,
+                    stdout,
+                    stderr,
+                    exit_code if exit_code is not None else -1,
+                    file_count,
+                    dir_count,
                 )
-                duration = time.monotonic() - start_time
-                self._save_scan_log(result, duration)
+                self._save_scan_log(result, time.monotonic() - start_time)
                 return result
 
             # Parse the results
@@ -229,60 +180,20 @@ class DaemonScanner:
             # Apply exclusion filtering (clamdscan doesn't support --exclude)
             result = self._filter_excluded_threats(result, profile_exclusions)
 
-            duration = time.monotonic() - start_time
-            self._save_scan_log(result, duration)
+            self._save_scan_log(result, time.monotonic() - start_time)
             return result
 
         except FileNotFoundError:
-            result = ScanResult(
-                status=ScanStatus.ERROR,
-                path=path,
-                stdout="",
-                stderr="clamdscan executable not found",
-                exit_code=-1,
-                infected_files=[],
-                scanned_files=0,
-                scanned_dirs=0,
-                infected_count=0,
-                error_message="clamdscan executable not found",
-                threat_details=[],
-            )
-            duration = time.monotonic() - start_time
-            self._save_scan_log(result, duration)
+            result = create_error_result(path, "clamdscan executable not found")
+            self._save_scan_log(result, time.monotonic() - start_time)
             return result
         except PermissionError as e:
-            result = ScanResult(
-                status=ScanStatus.ERROR,
-                path=path,
-                stdout="",
-                stderr=str(e),
-                exit_code=-1,
-                infected_files=[],
-                scanned_files=0,
-                scanned_dirs=0,
-                infected_count=0,
-                error_message=f"Permission denied: {e}",
-                threat_details=[],
-            )
-            duration = time.monotonic() - start_time
-            self._save_scan_log(result, duration)
+            result = create_error_result(path, f"Permission denied: {e}", str(e))
+            self._save_scan_log(result, time.monotonic() - start_time)
             return result
         except Exception as e:
-            result = ScanResult(
-                status=ScanStatus.ERROR,
-                path=path,
-                stdout="",
-                stderr=str(e),
-                exit_code=-1,
-                infected_files=[],
-                scanned_files=0,
-                scanned_dirs=0,
-                infected_count=0,
-                error_message=f"Scan failed: {e}",
-                threat_details=[],
-            )
-            duration = time.monotonic() - start_time
-            self._save_scan_log(result, duration)
+            result = create_error_result(path, f"Scan failed: {e}", str(e))
+            self._save_scan_log(result, time.monotonic() - start_time)
             return result
 
     def scan_async(
@@ -318,43 +229,6 @@ class DaemonScanner:
         thread.daemon = True
         thread.start()
 
-    def _communicate_with_cancel_check(self, process: subprocess.Popen) -> tuple[str, str, bool]:
-        """
-        Communicate with process while checking for cancellation.
-
-        Uses a polling loop with timeout to allow periodic cancellation checks.
-        This prevents the scan thread from blocking indefinitely on communicate().
-
-        Args:
-            process: The subprocess to communicate with.
-
-        Returns:
-            Tuple of (stdout, stderr, was_cancelled).
-        """
-        stdout_parts: list[str] = []
-        stderr_parts: list[str] = []
-
-        while True:
-            if self._scan_cancelled:
-                # Terminate process and collect any remaining output
-                try:
-                    process.terminate()
-                    stdout, stderr = process.communicate(timeout=2.0)
-                    stdout_parts.append(stdout or "")
-                    stderr_parts.append(stderr or "")
-                except subprocess.TimeoutExpired:
-                    process.kill()
-                    process.wait()
-                return "".join(stdout_parts), "".join(stderr_parts), True
-
-            try:
-                stdout, stderr = process.communicate(timeout=0.5)
-                stdout_parts.append(stdout or "")
-                stderr_parts.append(stderr or "")
-                return "".join(stdout_parts), "".join(stderr_parts), False
-            except subprocess.TimeoutExpired:
-                continue  # Loop again, check cancel flag
-
     def cancel(self) -> None:
         """
         Cancel the current scan operation with graceful shutdown escalation.
@@ -364,28 +238,7 @@ class DaemonScanner:
         the grace period.
         """
         self._scan_cancelled = True
-        process = self._current_process
-        if process is None:
-            return
-
-        # Step 1: SIGTERM (graceful)
-        try:
-            process.terminate()
-        except (OSError, ProcessLookupError):
-            # Process already gone
-            return
-
-        # Step 2: Wait for graceful termination
-        try:
-            process.wait(timeout=_TERMINATE_GRACE_TIMEOUT)
-        except subprocess.TimeoutExpired:
-            # Step 3: SIGKILL (forceful)
-            logger.warning("Daemon scan process didn't terminate gracefully, killing")
-            try:
-                process.kill()
-                process.wait(timeout=_KILL_WAIT_TIMEOUT)
-            except (OSError, ProcessLookupError, subprocess.TimeoutExpired):
-                pass  # Best effort
+        terminate_process_gracefully(self._current_process)
 
     def _build_command(
         self, path: str, recursive: bool, profile_exclusions: dict | None = None
@@ -741,31 +594,4 @@ class DaemonScanner:
 
     def _save_scan_log(self, result: ScanResult, duration: float) -> None:
         """Save scan result to log."""
-        # Map ScanStatus to string
-        status_map = {
-            ScanStatus.CLEAN: "clean",
-            ScanStatus.INFECTED: "infected",
-            ScanStatus.CANCELLED: "cancelled",
-            ScanStatus.ERROR: "error",
-        }
-        scan_status = status_map.get(result.status, "error")
-
-        # Convert threat details to dicts for the factory method
-        threat_dicts = [
-            {"file_path": t.file_path, "threat_name": t.threat_name} for t in result.threat_details
-        ]
-
-        entry = LogEntry.from_scan_result_data(
-            scan_status=scan_status,
-            path=result.path,
-            duration=duration,
-            scanned_files=result.scanned_files,
-            scanned_dirs=result.scanned_dirs,
-            infected_count=result.infected_count,
-            threat_details=threat_dicts,
-            error_message=result.error_message,
-            stdout=result.stdout,
-            suffix="(daemon)",
-            scheduled=False,
-        )
-        self._log_manager.save_log(entry)
+        save_scan_log(self._log_manager, result, duration, suffix="(daemon)")

@@ -145,6 +145,13 @@ show_missing = true
 [tool.coverage.html]
 directory = "htmlcov"
 
+[dependency-groups]
+dev = [
+    "pytest>=9.0.2",
+    "pytest-cov>=7.0.0",
+    "ruff>=0.14.10",
+]
+
 # System dependencies note:
 # ClamUI requires system packages for GTK4/PyGObject bindings:
 #
