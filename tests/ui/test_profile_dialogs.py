@@ -655,3 +655,296 @@ class TestProfileDialogWithPartialExclusions:
         assert "patterns" in data["exclusions"]
         assert "*.tmp" in data["exclusions"]["patterns"]
         assert "paths" not in data["exclusions"]
+
+
+class TestProfileDialogMultiFileSelection:
+    """Tests for ProfileDialog multi-file selection functionality."""
+
+    @pytest.fixture
+    def dialog_class(self):
+        """Import and return the ProfileDialog class."""
+        from src.ui.profile_dialogs import ProfileDialog
+
+        return ProfileDialog
+
+    def test_targets_selected_adds_multiple_files(self, dialog_class):
+        """Test that selecting multiple files via dialog adds all to targets."""
+        from unittest.mock import MagicMock
+
+        from gi.repository import GLib
+
+        dialog = dialog_class()
+
+        # Mock GLib.Error for successful case
+        mock_result = MagicMock()
+
+        # Create mock file list with multiple files
+        mock_file1 = MagicMock()
+        mock_file1.get_path.return_value = "/home/user/file1.txt"
+
+        mock_file2 = MagicMock()
+        mock_file2.get_path.return_value = "/home/user/file2.txt"
+
+        mock_file3 = MagicMock()
+        mock_file3.get_path.return_value = "/home/user/file3.txt"
+
+        mock_files = MagicMock()
+        mock_files.get_n_items.return_value = 3
+        mock_files.get_item.side_effect = [mock_file1, mock_file2, mock_file3]
+
+        # Create mock dialog that returns our files
+        mock_file_dialog = MagicMock()
+        # First try select_multiple_folders_finish (will fail), then open_multiple_finish
+        mock_file_dialog.select_multiple_folders_finish.side_effect = GLib.Error(
+            "not folder selection"
+        )
+        mock_file_dialog.open_multiple_finish.return_value = mock_files
+
+        dialog._on_targets_selected(mock_file_dialog, mock_result)
+
+        data = dialog.get_profile_data()
+        assert len(data["targets"]) == 3
+        assert "/home/user/file1.txt" in data["targets"]
+        assert "/home/user/file2.txt" in data["targets"]
+        assert "/home/user/file3.txt" in data["targets"]
+
+
+class TestProfileDialogMultiFolderSelection:
+    """Tests for ProfileDialog multi-folder selection functionality."""
+
+    @pytest.fixture
+    def dialog_class(self):
+        """Import and return the ProfileDialog class."""
+        from src.ui.profile_dialogs import ProfileDialog
+
+        return ProfileDialog
+
+    def test_folders_selected_adds_multiple_folders(self, dialog_class):
+        """Test that selecting multiple folders via dialog adds all to targets."""
+        from unittest.mock import MagicMock
+
+        dialog = dialog_class()
+
+        # Mock result
+        mock_result = MagicMock()
+
+        # Create mock folder list with multiple folders
+        mock_folder1 = MagicMock()
+        mock_folder1.get_path.return_value = "/home/user/documents"
+
+        mock_folder2 = MagicMock()
+        mock_folder2.get_path.return_value = "/home/user/downloads"
+
+        mock_folders = MagicMock()
+        mock_folders.get_n_items.return_value = 2
+        mock_folders.get_item.side_effect = [mock_folder1, mock_folder2]
+
+        # Create mock dialog that returns our folders
+        mock_file_dialog = MagicMock()
+        mock_file_dialog.select_multiple_folders_finish.return_value = mock_folders
+
+        dialog._on_targets_selected(mock_file_dialog, mock_result)
+
+        data = dialog.get_profile_data()
+        assert len(data["targets"]) == 2
+        assert "/home/user/documents" in data["targets"]
+        assert "/home/user/downloads" in data["targets"]
+
+
+class TestProfileDialogTargetDuplicateDetection:
+    """Tests for ProfileDialog target duplicate detection."""
+
+    @pytest.fixture
+    def dialog_class(self):
+        """Import and return the ProfileDialog class."""
+        from src.ui.profile_dialogs import ProfileDialog
+
+        return ProfileDialog
+
+    def test_duplicate_target_not_added(self, dialog_class):
+        """Test that adding a duplicate target path is rejected."""
+        from unittest.mock import MagicMock
+
+        dialog = dialog_class()
+
+        # First, add a target manually
+        dialog._add_target_to_list("/home/user/documents")
+
+        # Now try to add the same target via selection
+        mock_result = MagicMock()
+
+        mock_folder = MagicMock()
+        mock_folder.get_path.return_value = "/home/user/documents"
+
+        mock_folders = MagicMock()
+        mock_folders.get_n_items.return_value = 1
+        mock_folders.get_item.return_value = mock_folder
+
+        mock_file_dialog = MagicMock()
+        mock_file_dialog.select_multiple_folders_finish.return_value = mock_folders
+
+        dialog._on_targets_selected(mock_file_dialog, mock_result)
+
+        data = dialog.get_profile_data()
+        # Should still only have one entry, not two
+        assert len(data["targets"]) == 1
+
+    def test_mixed_new_and_duplicate_targets(self, dialog_class):
+        """Test that duplicates are rejected while new targets are added."""
+        from unittest.mock import MagicMock
+
+        dialog = dialog_class()
+
+        # Add initial target
+        dialog._add_target_to_list("/home/user/documents")
+
+        # Now try to add mix of duplicate and new targets
+        mock_result = MagicMock()
+
+        mock_folder1 = MagicMock()
+        mock_folder1.get_path.return_value = "/home/user/documents"  # Duplicate
+
+        mock_folder2 = MagicMock()
+        mock_folder2.get_path.return_value = "/home/user/downloads"  # New
+
+        mock_folders = MagicMock()
+        mock_folders.get_n_items.return_value = 2
+        mock_folders.get_item.side_effect = [mock_folder1, mock_folder2]
+
+        mock_file_dialog = MagicMock()
+        mock_file_dialog.select_multiple_folders_finish.return_value = mock_folders
+
+        dialog._on_targets_selected(mock_file_dialog, mock_result)
+
+        data = dialog.get_profile_data()
+        # Should have 2 targets (original + new one, but not duplicate)
+        assert len(data["targets"]) == 2
+        assert "/home/user/documents" in data["targets"]
+        assert "/home/user/downloads" in data["targets"]
+
+
+class TestProfileDialogExclusionPathMultiSelection:
+    """Tests for ProfileDialog exclusion path multi-selection."""
+
+    @pytest.fixture
+    def dialog_class(self):
+        """Import and return the ProfileDialog class."""
+        from src.ui.profile_dialogs import ProfileDialog
+
+        return ProfileDialog
+
+    def test_multiple_exclusion_paths_added(self, dialog_class):
+        """Test that selecting multiple exclusion paths adds all."""
+        from unittest.mock import MagicMock
+
+        dialog = dialog_class()
+
+        mock_result = MagicMock()
+
+        mock_folder1 = MagicMock()
+        mock_folder1.get_path.return_value = "/home/user/.cache"
+
+        mock_folder2 = MagicMock()
+        mock_folder2.get_path.return_value = "/home/user/.local"
+
+        mock_folders = MagicMock()
+        mock_folders.get_n_items.return_value = 2
+        mock_folders.get_item.side_effect = [mock_folder1, mock_folder2]
+
+        mock_file_dialog = MagicMock()
+        mock_file_dialog.select_multiple_folders_finish.return_value = mock_folders
+
+        dialog._on_exclusion_paths_selected(mock_file_dialog, mock_result)
+
+        data = dialog.get_profile_data()
+        assert "paths" in data["exclusions"]
+        assert len(data["exclusions"]["paths"]) == 2
+        assert "/home/user/.cache" in data["exclusions"]["paths"]
+        assert "/home/user/.local" in data["exclusions"]["paths"]
+
+    def test_duplicate_exclusion_path_not_added(self, dialog_class):
+        """Test that duplicate exclusion paths are rejected."""
+        from unittest.mock import MagicMock
+
+        dialog = dialog_class()
+
+        # Add initial exclusion path
+        dialog._add_exclusion_path_to_list("/home/user/.cache")
+
+        # Try to add duplicate
+        mock_result = MagicMock()
+
+        mock_folder = MagicMock()
+        mock_folder.get_path.return_value = "/home/user/.cache"
+
+        mock_folders = MagicMock()
+        mock_folders.get_n_items.return_value = 1
+        mock_folders.get_item.return_value = mock_folder
+
+        mock_file_dialog = MagicMock()
+        mock_file_dialog.select_multiple_folders_finish.return_value = mock_folders
+
+        dialog._on_exclusion_paths_selected(mock_file_dialog, mock_result)
+
+        data = dialog.get_profile_data()
+        assert len(data["exclusions"]["paths"]) == 1
+
+
+class TestProfileDialogOpenFileDialogParams:
+    """Tests for ProfileDialog file dialog parameter handling."""
+
+    @pytest.fixture
+    def dialog_class(self):
+        """Import and return the ProfileDialog class."""
+        from src.ui.profile_dialogs import ProfileDialog
+
+        return ProfileDialog
+
+    def test_add_target_folder_uses_multiple_selection(self, dialog_class):
+        """Test that add target folder button uses multi-selection."""
+        from unittest.mock import MagicMock, patch
+
+        dialog = dialog_class()
+
+        # Mock get_root to return a window
+        dialog.get_root = MagicMock()
+
+        with patch.object(dialog, "_open_file_dialog") as mock_open:
+            dialog._on_add_target_folder_clicked(MagicMock())
+
+            mock_open.assert_called_once()
+            call_kwargs = mock_open.call_args
+            assert call_kwargs[1]["select_folder"] is True
+            assert call_kwargs[1]["multiple"] is True
+
+    def test_add_target_file_uses_multiple_selection(self, dialog_class):
+        """Test that add target file button uses multi-selection."""
+        from unittest.mock import MagicMock, patch
+
+        dialog = dialog_class()
+
+        dialog.get_root = MagicMock()
+
+        with patch.object(dialog, "_open_file_dialog") as mock_open:
+            dialog._on_add_target_file_clicked(MagicMock())
+
+            mock_open.assert_called_once()
+            call_kwargs = mock_open.call_args
+            assert call_kwargs[1]["select_folder"] is False
+            assert call_kwargs[1]["multiple"] is True
+
+    def test_add_exclusion_path_uses_multiple_selection(self, dialog_class):
+        """Test that add exclusion path button uses multi-selection."""
+        from unittest.mock import MagicMock, patch
+
+        dialog = dialog_class()
+
+        dialog.get_root = MagicMock()
+
+        with patch.object(dialog, "_open_file_dialog") as mock_open:
+            dialog._on_add_exclusion_path_clicked(MagicMock())
+
+            mock_open.assert_called_once()
+            call_kwargs = mock_open.call_args
+            assert call_kwargs[1]["select_folder"] is True
+            assert call_kwargs[1]["multiple"] is True
