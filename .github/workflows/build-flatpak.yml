@@ -18,13 +18,22 @@ jobs:
     runs-on: ubuntu-22.04
     container:
       image: ghcr.io/flathub-infra/flatpak-github-actions:gnome-49
-      options: --privileged -v /var/run/docker.sock:/var/run/docker.sock
+      options: --privileged
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Install Docker for QEMU setup
+        if: matrix.arch != 'x86_64'
+        run: |
+          curl -L https://download.docker.com/linux/static/stable/x86_64/docker-26.0.0.tgz \
+            --output /tmp/docker.tgz
+          tar xzf /tmp/docker.tgz -C /tmp
+          mv /tmp/docker/* /usr/bin/
+          rm -rf /tmp/docker /tmp/docker.tgz
+
       - name: Set up QEMU for aarch64 emulation
-        if: matrix.arch == 'aarch64'
+        if: matrix.arch != 'x86_64'
         uses: docker/setup-qemu-action@v3
         with:
           platforms: arm64
