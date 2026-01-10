@@ -1102,3 +1102,204 @@ class TestDaemonScannerCancelFlagReset:
             result = scanner.scan_sync(str(test_file), count_targets=False)
 
         assert result.status == scan_status_class.CLEAN
+
+
+class TestDaemonScannerExclusionHelpers:
+    """Tests for DaemonScanner exclusion helper methods."""
+
+    def test_collect_exclusion_patterns_from_settings(self, daemon_scanner_class):
+        """Test collecting patterns from global settings."""
+        mock_settings = MagicMock()
+        mock_settings.get.return_value = [
+            {"pattern": "*.log", "type": "file", "enabled": True},
+            {"pattern": "*.tmp", "type": "file", "enabled": True},
+            {"pattern": "*.bak", "type": "file", "enabled": False},  # disabled
+        ]
+        scanner = daemon_scanner_class(settings_manager=mock_settings)
+
+        patterns = scanner._collect_exclusion_patterns()
+
+        assert len(patterns) == 2
+        assert "*.log" in patterns
+        assert "*.tmp" in patterns
+        assert "*.bak" not in patterns
+
+    def test_collect_exclusion_patterns_from_profile(self, daemon_scanner_class):
+        """Test collecting patterns from profile exclusions."""
+        mock_settings = MagicMock()
+        mock_settings.get.return_value = []
+        scanner = daemon_scanner_class(settings_manager=mock_settings)
+
+        profile_exclusions = {"patterns": ["*.cache", "*.swp", ""], "paths": []}
+        patterns = scanner._collect_exclusion_patterns(profile_exclusions)
+
+        assert len(patterns) == 2
+        assert "*.cache" in patterns
+        assert "*.swp" in patterns
+
+    def test_collect_exclusion_patterns_combines_sources(self, daemon_scanner_class):
+        """Test that patterns from settings and profile are combined."""
+        mock_settings = MagicMock()
+        mock_settings.get.return_value = [
+            {"pattern": "*.log", "type": "file", "enabled": True},
+        ]
+        scanner = daemon_scanner_class(settings_manager=mock_settings)
+
+        profile_exclusions = {"patterns": ["*.cache"], "paths": []}
+        patterns = scanner._collect_exclusion_patterns(profile_exclusions)
+
+        assert len(patterns) == 2
+        assert "*.log" in patterns
+        assert "*.cache" in patterns
+
+    def test_collect_exclusion_patterns_empty_when_no_settings(self, daemon_scanner_class):
+        """Test that empty list is returned when no settings manager."""
+        scanner = daemon_scanner_class()
+
+        patterns = scanner._collect_exclusion_patterns()
+
+        assert patterns == []
+
+    def test_collect_exclusion_paths_from_profile(self, daemon_scanner_class, tmp_path):
+        """Test collecting paths from profile exclusions."""
+        mock_settings = MagicMock()
+        mock_settings.get.return_value = []
+        scanner = daemon_scanner_class(settings_manager=mock_settings)
+
+        excluded_dir = tmp_path / "excluded"
+        excluded_dir.mkdir()
+
+        profile_exclusions = {"patterns": [], "paths": [str(excluded_dir), ""]}
+        paths = scanner._collect_exclusion_paths(profile_exclusions)
+
+        assert len(paths) == 1
+        assert paths[0] == excluded_dir.resolve()
+
+    def test_collect_exclusion_paths_expands_tilde(
+        self, daemon_scanner_class, monkeypatch, tmp_path
+    ):
+        """Test that tilde paths are expanded."""
+        mock_settings = MagicMock()
+        mock_settings.get.return_value = []
+        scanner = daemon_scanner_class(settings_manager=mock_settings)
+
+        fake_home = tmp_path / "fakehome"
+        cache_dir = fake_home / ".cache"
+        cache_dir.mkdir(parents=True)
+        monkeypatch.setenv("HOME", str(fake_home))
+
+        profile_exclusions = {"patterns": [], "paths": ["~/.cache"]}
+        paths = scanner._collect_exclusion_paths(profile_exclusions)
+
+        assert len(paths) == 1
+        assert str(paths[0]).endswith(".cache")
+
+    def test_collect_exclusion_paths_empty_when_no_profile(self, daemon_scanner_class):
+        """Test that empty list is returned when no profile exclusions."""
+        scanner = daemon_scanner_class()
+
+        paths = scanner._collect_exclusion_paths()
+
+        assert paths == []
+
+    def test_matches_exclusion_pattern_exact_match(self, daemon_scanner_class):
+        """Test exact path matching."""
+        scanner = daemon_scanner_class()
+
+        patterns = ["/home/user/eicar.txt"]
+        assert scanner._matches_exclusion_pattern("/home/user/eicar.txt", patterns) is True
+        assert scanner._matches_exclusion_pattern("/home/user/other.txt", patterns) is False
+
+    def test_matches_exclusion_pattern_glob_pattern(self, daemon_scanner_class):
+        """Test glob pattern matching."""
+        scanner = daemon_scanner_class()
+
+        patterns = ["*.log", "*.tmp"]
+        assert scanner._matches_exclusion_pattern("/var/log/test.log", patterns) is True
+        assert scanner._matches_exclusion_pattern("/tmp/file.tmp", patterns) is True
+        assert scanner._matches_exclusion_pattern("/home/user/file.txt", patterns) is False
+
+    def test_matches_exclusion_pattern_with_tilde(
+        self, daemon_scanner_class, monkeypatch, tmp_path
+    ):
+        """Test pattern matching with tilde expansion."""
+        fake_home = tmp_path / "fakehome"
+        fake_home.mkdir()
+        monkeypatch.setenv("HOME", str(fake_home))
+
+        scanner = daemon_scanner_class()
+
+        patterns = ["~/.cache/*"]
+        # After tilde expansion, the pattern becomes the full path
+        assert scanner._matches_exclusion_pattern(str(fake_home / ".cache/file"), patterns) is True
+
+    def test_matches_exclusion_pattern_empty_patterns(self, daemon_scanner_class):
+        """Test that empty patterns list returns False."""
+        scanner = daemon_scanner_class()
+
+        assert scanner._matches_exclusion_pattern("/some/file.txt", []) is False
+
+    def test_matches_exclusion_path_direct_match(self, daemon_scanner_class, tmp_path):
+        """Test direct path matching."""
+        scanner = daemon_scanner_class()
+
+        excluded_dir = tmp_path / "excluded"
+        excluded_dir.mkdir()
+        exclude_paths = [excluded_dir.resolve()]
+
+        # File is exactly the excluded path (edge case, but valid)
+        assert scanner._matches_exclusion_path(str(excluded_dir), exclude_paths) is True
+
+    def test_matches_exclusion_path_subdirectory(self, daemon_scanner_class, tmp_path):
+        """Test subdirectory path matching."""
+        scanner = daemon_scanner_class()
+
+        excluded_dir = tmp_path / "excluded"
+        excluded_dir.mkdir()
+        subdir = excluded_dir / "subdir"
+        subdir.mkdir()
+        file_in_subdir = subdir / "file.txt"
+        file_in_subdir.touch()
+
+        exclude_paths = [excluded_dir.resolve()]
+
+        assert scanner._matches_exclusion_path(str(file_in_subdir), exclude_paths) is True
+
+    def test_matches_exclusion_path_outside_excluded(self, daemon_scanner_class, tmp_path):
+        """Test that files outside excluded paths don't match."""
+        scanner = daemon_scanner_class()
+
+        excluded_dir = tmp_path / "excluded"
+        excluded_dir.mkdir()
+        other_dir = tmp_path / "other"
+        other_dir.mkdir()
+        file_in_other = other_dir / "file.txt"
+        file_in_other.touch()
+
+        exclude_paths = [excluded_dir.resolve()]
+
+        assert scanner._matches_exclusion_path(str(file_in_other), exclude_paths) is False
+
+    def test_matches_exclusion_path_empty_paths(self, daemon_scanner_class):
+        """Test that empty paths list returns False."""
+        scanner = daemon_scanner_class()
+
+        assert scanner._matches_exclusion_path("/some/file.txt", []) is False
+
+    def test_matches_exclusion_path_similar_prefix_not_matched(
+        self, daemon_scanner_class, tmp_path
+    ):
+        """Test that paths with similar prefixes are not incorrectly matched."""
+        scanner = daemon_scanner_class()
+
+        excluded_dir = tmp_path / "excluded"
+        excluded_dir.mkdir()
+        similar_dir = tmp_path / "excluded_other"
+        similar_dir.mkdir()
+        file_in_similar = similar_dir / "file.txt"
+        file_in_similar.touch()
+
+        exclude_paths = [excluded_dir.resolve()]
+
+        # Should NOT match because "excluded_other" is not under "excluded"
+        assert scanner._matches_exclusion_path(str(file_in_similar), exclude_paths) is False

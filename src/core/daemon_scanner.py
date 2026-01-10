@@ -488,6 +488,103 @@ class DaemonScanner:
             threat_details=threat_details,
         )
 
+    def _collect_exclusion_patterns(self, profile_exclusions: dict | None = None) -> list[str]:
+        """
+        Collect all exclusion patterns from settings and profile.
+
+        Args:
+            profile_exclusions: Optional exclusions from a scan profile
+
+        Returns:
+            List of exclusion patterns (glob patterns or exact paths)
+        """
+        patterns: list[str] = []
+
+        # Global exclusions from settings
+        if self._settings_manager is not None:
+            exclusions = self._settings_manager.get("exclusion_patterns", [])
+            for exclusion in exclusions:
+                if not exclusion.get("enabled", True):
+                    continue
+                pattern = exclusion.get("pattern", "")
+                if pattern:
+                    patterns.append(pattern)
+
+        # Profile exclusions - patterns
+        if profile_exclusions:
+            for pattern in profile_exclusions.get("patterns", []):
+                if pattern:
+                    patterns.append(pattern)
+
+        return patterns
+
+    def _collect_exclusion_paths(self, profile_exclusions: dict | None = None) -> list[Path]:
+        """
+        Collect all exclusion directory paths from profile.
+
+        Args:
+            profile_exclusions: Optional exclusions from a scan profile
+
+        Returns:
+            List of resolved Path objects for excluded directories
+        """
+        paths: list[Path] = []
+
+        if profile_exclusions:
+            for path_str in profile_exclusions.get("paths", []):
+                if path_str:
+                    path = Path(path_str).expanduser().resolve()
+                    paths.append(path)
+
+        return paths
+
+    def _matches_exclusion_pattern(self, file_path: str, patterns: list[str]) -> bool:
+        """
+        Check if a file path matches any exclusion pattern.
+
+        Args:
+            file_path: The file path to check
+            patterns: List of exclusion patterns (glob or exact path)
+
+        Returns:
+            True if the file matches any pattern
+        """
+        for pattern in patterns:
+            # Expand ~ in patterns
+            if pattern.startswith("~"):
+                pattern = str(Path(pattern).expanduser())
+
+            # Check for exact path match or fnmatch pattern match
+            if file_path == pattern or fnmatch.fnmatch(file_path, pattern):
+                return True
+
+        return False
+
+    def _matches_exclusion_path(self, file_path: str, exclude_paths: list[Path]) -> bool:
+        """
+        Check if a file path is under any excluded directory.
+
+        Args:
+            file_path: The file path to check
+            exclude_paths: List of resolved excluded directory paths
+
+        Returns:
+            True if the file is under any excluded directory
+        """
+        if not exclude_paths:
+            return False
+
+        resolved_file = Path(file_path).resolve()
+        resolved_file_str = str(resolved_file)
+
+        for excl_path in exclude_paths:
+            excl_path_str = str(excl_path)
+            # Match if file is the excluded path or under it
+            if resolved_file == excl_path or resolved_file_str.startswith(excl_path_str + "/"):
+                return True
+
+        return False
+
     def _filter_excluded_threats(
         self, result: ScanResult, profile_exclusions: dict | None = None
     ) -> ScanResult:
@@ -507,72 +604,30 @@ class DaemonScanner:
         if result.status != ScanStatus.INFECTED or not result.threat_details:
             return result
 
-        # Collect all exclusion patterns
-        exclude_patterns: list[str] = []
-
-        # Global exclusions from settings
-        if self._settings_manager is not None:
-            exclusions = self._settings_manager.get("exclusion_patterns", [])
-            for exclusion in exclusions:
-                if not exclusion.get("enabled", True):
-                    continue
-                pattern = exclusion.get("pattern", "")
-                if pattern:
-                    exclude_patterns.append(pattern)
-
-        # Profile exclusions - patterns
-        if profile_exclusions:
-            for pattern in profile_exclusions.get("patterns", []):
-                if pattern:
-                    exclude_patterns.append(pattern)
-
-        # Profile exclusions - directory paths
-        exclude_paths: list[Path] = []
-        if profile_exclusions:
-            for path_str in profile_exclusions.get("paths", []):
-                if path_str:
-                    path = Path(path_str).expanduser().resolve()
-                    exclude_paths.append(path)
+        # Collect exclusion patterns and paths using helper methods
+        exclude_patterns = self._collect_exclusion_patterns(profile_exclusions)
+        exclude_paths = self._collect_exclusion_paths(profile_exclusions)
 
         if not exclude_patterns and not exclude_paths:
             return result
 
-        # Filter threats
+        # Filter threats using helper methods
         filtered_threats = []
         filtered_files = []
 
         for threat in result.threat_details:
             file_path = threat.file_path
-            is_excluded = False
 
-            for pattern in exclude_patterns:
-                # Expand ~ in patterns
-                if pattern.startswith("~"):
-                    pattern = str(Path(pattern).expanduser())
+            # Check pattern exclusions, then path exclusions
+            if self._matches_exclusion_pattern(file_path, exclude_patterns):
+                continue
+            if self._matches_exclusion_path(file_path, exclude_paths):
+                continue
 
-                # Check for exact path match or fnmatch pattern match
-                if file_path == pattern or fnmatch.fnmatch(file_path, pattern):
-                    is_excluded = True
-                    break
+            filtered_threats.append(threat)
+            filtered_files.append(file_path)
 
-            # Check against excluded directory paths
-            if not is_excluded and exclude_paths:
-                resolved_file = Path(file_path).resolve()
-                resolved_file_str = str(resolved_file)
-                for excl_path in exclude_paths:
-                    excl_path_str = str(excl_path)
-                    # Match if file is the excluded path or under it
-                    if resolved_file == excl_path or resolved_file_str.startswith(
-                        excl_path_str + "/"
-                    ):
-                        is_excluded = True
-                        break
-
-            if not is_excluded:
-                filtered_threats.append(threat)
-                filtered_files.append(file_path)
-
-        # If all threats were filtered, return CLEAN status
+        # Build result based on remaining threats
         if not filtered_threats:
             return ScanResult(
                 status=ScanStatus.CLEAN,
@@ -588,7 +643,6 @@ class DaemonScanner:
                 threat_details=[],
             )
 
-        # Return result with filtered threats
         return ScanResult(
             status=ScanStatus.INFECTED,
             path=result.path,
