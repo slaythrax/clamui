@@ -8,10 +8,12 @@ Orchestrates the QuarantineDatabase and SecureFileHandler to provide:
 - Permanently deleting quarantined files
 - Listing and managing quarantine entries
 - Async operations for UI integration
+- Periodic cleanup of orphaned database entries
 """
 
 import logging
 import threading
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
@@ -66,6 +68,13 @@ class QuarantineManager:
     quarantine list. Supports both synchronous and asynchronous operations
     for UI integration.
 
+    Periodic Cleanup:
+        The manager automatically cleans up orphaned database entries (entries
+        whose files no longer exist on disk) periodically. Cleanup runs:
+        - On first access after CLEANUP_INTERVAL_HOURS has passed since the last cleanup
+        - The cleanup is triggered lazily during normal operations to avoid
+          blocking application startup
+
     Example:
         >>> manager = QuarantineManager()
         >>> result = manager.quarantine_file("/home/user/malware.exe", "Win.Trojan.Generic")
@@ -73,10 +82,14 @@ class QuarantineManager:
         ...     print(f"File quarantined: {result.entry.quarantine_path}")
     """
 
+    # Minimum interval between orphan cleanup runs (24 hours)
+    CLEANUP_INTERVAL_HOURS = 24
+
     def __init__(
         self,
         quarantine_directory: str | None = None,
         database_path: str | None = None,
+        enable_periodic_cleanup: bool = True,
     ):
         """
         Initialize the QuarantineManager.
@@ -86,12 +99,19 @@ class QuarantineManager:
                                   Defaults to XDG_DATA_HOME/clamui/quarantine
             database_path: Optional custom database path.
                            Defaults to XDG_DATA_HOME/clamui/quarantine.db
+            enable_periodic_cleanup: Whether to enable periodic orphan cleanup.
+                                     Defaults to True. Set to False for testing.
         """
         self._file_handler = SecureFileHandler(quarantine_directory)
         self._database = QuarantineDatabase(database_path)
 
         # Thread lock for safe concurrent access
         self._lock = threading.Lock()
+
+        # Periodic cleanup state
+        self._enable_periodic_cleanup = enable_periodic_cleanup
+        self._last_cleanup_check_time: float = 0.0
+        self._cleanup_timestamp_file = self._database._db_path.parent / ".last_orphan_cleanup"
 
     @property
     def quarantine_directory(self) -> Path:
@@ -282,9 +302,15 @@ class QuarantineManager:
 
             # Remove entry from database
             if not self._database.remove_entry(entry_id):
-                # File restored but database entry remains
-                # This is not critical - entry can be cleaned up later
-                pass
+                # File restored but database entry remains - this creates an orphaned entry
+                # Log warning so it can be identified and cleaned up later
+                logger.warning(
+                    "Failed to remove database entry %d after successful file restore. "
+                    "Entry is now orphaned (file at %s no longer exists). "
+                    "Run cleanup_orphaned_entries() to resolve.",
+                    entry_id,
+                    entry.quarantine_path,
+                )
 
             return QuarantineResult(
                 status=QuarantineStatus.SUCCESS,
@@ -360,9 +386,15 @@ class QuarantineManager:
 
             # Remove entry from database
             if not self._database.remove_entry(entry_id):
-                # File deleted but database entry remains
-                # This is not critical - entry can be cleaned up later
-                pass
+                # File deleted but database entry remains - this creates an orphaned entry
+                # Log warning so it can be identified and cleaned up later
+                logger.warning(
+                    "Failed to remove database entry %d after successful file deletion. "
+                    "Entry is now orphaned (file at %s no longer exists). "
+                    "Run cleanup_orphaned_entries() to resolve.",
+                    entry_id,
+                    entry.quarantine_path,
+                )
 
             return QuarantineResult(
                 status=QuarantineStatus.SUCCESS,
@@ -422,9 +454,15 @@ class QuarantineManager:
         """
         Retrieve all quarantine entries, sorted by detection date (newest first).
 
+        Note: This method may trigger periodic orphan cleanup if enough time
+        has passed since the last cleanup (default: 24 hours).
+
         Returns:
             List of QuarantineEntry objects
         """
+        # Trigger periodic cleanup if needed (runs synchronously but is fast)
+        self.maybe_run_periodic_cleanup()
+
         return self._database.get_all_entries()
 
     def get_all_entries_async(
@@ -437,12 +475,16 @@ class QuarantineManager:
         The operation runs in a background thread and the callback is invoked
         on the main GTK thread via GLib.idle_add when complete.
 
+        Note: This method may trigger periodic orphan cleanup if enough time
+        has passed since the last cleanup (default: 24 hours).
+
         Args:
             callback: Function to call with list of QuarantineEntry objects when complete
         """
 
         def _get_entries_thread():
             try:
+                # Periodic cleanup runs within get_all_entries
                 entries = self.get_all_entries()
             except Exception as e:
                 logger.debug("Failed to get quarantine entries async: %s", e)
@@ -482,6 +524,188 @@ class QuarantineManager:
             List of QuarantineEntry objects older than the specified days
         """
         return self._database.get_old_entries(days)
+
+    def verify_entry(self, entry_id: int) -> tuple[bool, str | None]:
+        """
+        Verify if a quarantine entry's file exists on disk.
+
+        Checks whether the quarantine file referenced by the database entry
+        actually exists in the quarantine directory.
+
+        Args:
+            entry_id: The ID of the quarantine entry to verify
+
+        Returns:
+            Tuple of (exists, error_message):
+            - (True, None) if the file exists
+            - (False, error_message) if the entry doesn't exist or file is missing
+        """
+        entry = self._database.get_entry(entry_id)
+        if entry is None:
+            return (False, f"Quarantine entry not found: {entry_id}")
+
+        quarantine_path = Path(entry.quarantine_path)
+        if not quarantine_path.exists():
+            return (False, f"Quarantine file missing: {entry.quarantine_path}")
+
+        return (True, None)
+
+    def cleanup_orphaned_entries(self) -> int:
+        """
+        Remove database entries whose quarantine files no longer exist.
+
+        Scans all quarantine entries and removes any whose corresponding file
+        has been deleted or is missing from disk. This can happen when:
+        - A file was restored/deleted but remove_entry() failed
+        - Files were manually deleted from the quarantine directory
+        - Filesystem corruption or external cleanup occurred
+
+        Returns:
+            Number of orphaned entries removed
+        """
+        with self._lock:
+            entries = self._database.get_all_entries()
+            removed_count = 0
+
+            for entry in entries:
+                quarantine_path = Path(entry.quarantine_path)
+                if not quarantine_path.exists():
+                    logger.warning(
+                        "Removing orphaned quarantine entry %d: file missing at %s",
+                        entry.id,
+                        entry.quarantine_path,
+                    )
+                    if self._database.remove_entry(entry.id):
+                        removed_count += 1
+                    else:
+                        logger.error(
+                            "Failed to remove orphaned entry %d from database",
+                            entry.id,
+                        )
+
+            if removed_count > 0:
+                logger.info("Cleaned up %d orphaned quarantine entries", removed_count)
+
+            return removed_count
+
+    def cleanup_orphaned_entries_async(
+        self,
+        callback: Callable[[int], None],
+    ) -> None:
+        """
+        Remove orphaned database entries asynchronously.
+
+        The operation runs in a background thread and the callback is invoked
+        on the main GTK thread via GLib.idle_add when complete.
+
+        Args:
+            callback: Function to call with removed count when complete
+        """
+
+        def _cleanup_thread():
+            removed_count = self.cleanup_orphaned_entries()
+            GLib.idle_add(callback, removed_count)
+
+        thread = threading.Thread(target=_cleanup_thread)
+        thread.daemon = True
+        thread.start()
+
+    def _get_last_cleanup_timestamp(self) -> float:
+        """
+        Get the timestamp of the last orphan cleanup.
+
+        Returns:
+            Unix timestamp of last cleanup, or 0.0 if never run
+        """
+        try:
+            if self._cleanup_timestamp_file.exists():
+                return float(self._cleanup_timestamp_file.read_text().strip())
+        except (OSError, ValueError) as e:
+            logger.debug("Could not read cleanup timestamp: %s", e)
+        return 0.0
+
+    def _set_last_cleanup_timestamp(self) -> None:
+        """Record the current time as the last cleanup timestamp."""
+        try:
+            self._cleanup_timestamp_file.parent.mkdir(parents=True, exist_ok=True)
+            self._cleanup_timestamp_file.write_text(str(time.time()))
+        except OSError as e:
+            logger.debug("Could not write cleanup timestamp: %s", e)
+
+    def _should_run_periodic_cleanup(self) -> bool:
+        """
+        Check if periodic cleanup should run based on time elapsed.
+
+        Returns:
+            True if cleanup should run, False otherwise
+        """
+        if not self._enable_periodic_cleanup:
+            return False
+
+        # Throttle check frequency to once per minute to avoid disk I/O
+        current_time = time.time()
+        if current_time - self._last_cleanup_check_time < 60:
+            return False
+        self._last_cleanup_check_time = current_time
+
+        last_cleanup = self._get_last_cleanup_timestamp()
+        hours_since_cleanup = (current_time - last_cleanup) / 3600
+
+        return hours_since_cleanup >= self.CLEANUP_INTERVAL_HOURS
+
+    def maybe_run_periodic_cleanup(self) -> int:
+        """
+        Run periodic cleanup if enough time has passed since the last run.
+
+        This method is designed to be called during normal operations (e.g.,
+        when listing entries) to lazily trigger cleanup without blocking
+        application startup.
+
+        Returns:
+            Number of orphaned entries removed, or 0 if cleanup was skipped
+        """
+        if not self._should_run_periodic_cleanup():
+            return 0
+
+        logger.debug("Running periodic orphan cleanup...")
+        removed = self.cleanup_orphaned_entries()
+        self._set_last_cleanup_timestamp()
+
+        if removed > 0:
+            logger.info("Periodic cleanup removed %d orphaned quarantine entries", removed)
+
+        return removed
+
+    def maybe_run_periodic_cleanup_async(
+        self,
+        callback: Callable[[int], None] | None = None,
+    ) -> None:
+        """
+        Run periodic cleanup asynchronously if enough time has passed.
+
+        This is the preferred method for UI contexts. It checks if cleanup
+        is needed and runs it in a background thread if so.
+
+        Args:
+            callback: Optional function to call with removed count when complete.
+                      Only called if cleanup actually ran.
+        """
+        if not self._should_run_periodic_cleanup():
+            return
+
+        def _cleanup_thread():
+            removed = self.cleanup_orphaned_entries()
+            self._set_last_cleanup_timestamp()
+
+            if removed > 0:
+                logger.info("Periodic cleanup removed %d orphaned quarantine entries", removed)
+
+            if callback is not None:
+                GLib.idle_add(callback, removed)
+
+        thread = threading.Thread(target=_cleanup_thread)
+        thread.daemon = True
+        thread.start()
 
     def cleanup_old_entries(self, days: int = 30) -> int:
         """

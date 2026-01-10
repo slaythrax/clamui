@@ -105,6 +105,7 @@ class TestQuarantineManager:
         mgr = QuarantineManager(
             quarantine_directory=quarantine_dir,
             database_path=db_path,
+            enable_periodic_cleanup=False,  # Disable for faster tests
         )
         yield mgr
         mgr._database.close()
@@ -124,6 +125,7 @@ class TestQuarantineManager:
         mgr = QuarantineManager(
             quarantine_directory=quarantine_dir,
             database_path=db_path,
+            enable_periodic_cleanup=False,
         )
         assert Path(quarantine_dir).exists()
         mgr._database.close()
@@ -251,6 +253,7 @@ class TestQuarantineManagerRestore:
         mgr = QuarantineManager(
             quarantine_directory=quarantine_dir,
             database_path=db_path,
+            enable_periodic_cleanup=False,
         )
         yield mgr
         mgr._database.close()
@@ -433,6 +436,7 @@ class TestQuarantineManagerPermissions:
         mgr = QuarantineManager(
             quarantine_directory=quarantine_dir,
             database_path=db_path,
+            enable_periodic_cleanup=False,
         )
         yield mgr
         mgr._database.close()
@@ -768,6 +772,7 @@ class TestQuarantineManagerQueries:
         mgr = QuarantineManager(
             quarantine_directory=quarantine_dir,
             database_path=db_path,
+            enable_periodic_cleanup=False,
         )
         yield mgr
         mgr._database.close()
@@ -788,3 +793,512 @@ class TestQuarantineManagerQueries:
         # Verify all entries are retrieved
         entries = manager.get_all_entries()
         assert len(entries) == 3
+
+
+class TestQuarantineManagerVerifyEntry:
+    """Tests for the QuarantineManager verify_entry method."""
+
+    @pytest.fixture
+    def temp_dir(self):
+        """Create a temporary directory for quarantine operations."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            yield tmpdir
+
+    @pytest.fixture
+    def manager(self, temp_dir):
+        """Create a QuarantineManager with temporary directories."""
+        quarantine_dir = os.path.join(temp_dir, "quarantine")
+        db_path = os.path.join(temp_dir, "quarantine.db")
+        mgr = QuarantineManager(
+            quarantine_directory=quarantine_dir,
+            database_path=db_path,
+        )
+        yield mgr
+        mgr._database.close()
+
+    @pytest.fixture
+    def quarantined_file(self, manager, temp_dir):
+        """Create and quarantine a test file."""
+        file_path = os.path.join(temp_dir, "test.exe")
+        with open(file_path, "wb") as f:
+            f.write(b"Test content for verify testing")
+
+        result = manager.quarantine_file(file_path, "TestThreat")
+        assert result.is_success is True
+        return result.entry
+
+    def test_verify_entry_exists(self, manager, quarantined_file):
+        """Test verify_entry returns True when file exists."""
+        exists, error = manager.verify_entry(quarantined_file.id)
+
+        assert exists is True
+        assert error is None
+
+    def test_verify_entry_not_found(self, manager):
+        """Test verify_entry returns False for non-existent entry."""
+        exists, error = manager.verify_entry(999999)
+
+        assert exists is False
+        assert error is not None
+        assert "not found" in error.lower()
+
+    def test_verify_entry_file_missing(self, manager, quarantined_file):
+        """Test verify_entry returns False when file is missing from disk."""
+        # Remove the quarantine file manually
+        quarantine_path = Path(quarantined_file.quarantine_path)
+        quarantine_path.unlink()
+
+        exists, error = manager.verify_entry(quarantined_file.id)
+
+        assert exists is False
+        assert error is not None
+        assert "missing" in error.lower()
+
+
+class TestQuarantineManagerCleanupOrphaned:
+    """Tests for the QuarantineManager cleanup_orphaned_entries method."""
+
+    @pytest.fixture
+    def temp_dir(self):
+        """Create a temporary directory for quarantine operations."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            yield tmpdir
+
+    @pytest.fixture
+    def manager(self, temp_dir):
+        """Create a QuarantineManager with temporary directories."""
+        quarantine_dir = os.path.join(temp_dir, "quarantine")
+        db_path = os.path.join(temp_dir, "quarantine.db")
+        mgr = QuarantineManager(
+            quarantine_directory=quarantine_dir,
+            database_path=db_path,
+            enable_periodic_cleanup=False,
+        )
+        yield mgr
+        mgr._database.close()
+
+    def test_cleanup_orphaned_entries_empty(self, manager):
+        """Test cleanup_orphaned_entries returns 0 when no entries exist."""
+        removed = manager.cleanup_orphaned_entries()
+        assert removed == 0
+
+    def test_cleanup_orphaned_entries_no_orphans(self, manager, temp_dir):
+        """Test cleanup_orphaned_entries returns 0 when all files exist."""
+        # Create and quarantine some files
+        for i in range(3):
+            file_path = os.path.join(temp_dir, f"test_{i}.exe")
+            with open(file_path, "wb") as f:
+                f.write(b"Test content")
+            manager.quarantine_file(file_path, f"Threat{i}")
+
+        removed = manager.cleanup_orphaned_entries()
+        assert removed == 0
+        assert len(manager.get_all_entries()) == 3
+
+    def test_cleanup_orphaned_entries_removes_orphans(self, manager, temp_dir):
+        """Test cleanup_orphaned_entries removes entries with missing files."""
+        # Create and quarantine some files
+        entries = []
+        for i in range(3):
+            file_path = os.path.join(temp_dir, f"test_{i}.exe")
+            with open(file_path, "wb") as f:
+                f.write(b"Test content")
+            result = manager.quarantine_file(file_path, f"Threat{i}")
+            entries.append(result.entry)
+
+        # Manually remove one quarantine file to create an orphan
+        Path(entries[1].quarantine_path).unlink()
+
+        removed = manager.cleanup_orphaned_entries()
+        assert removed == 1
+        assert len(manager.get_all_entries()) == 2
+
+        # Verify the correct entry was removed
+        assert manager.get_entry(entries[0].id) is not None
+        assert manager.get_entry(entries[1].id) is None  # Orphan removed
+        assert manager.get_entry(entries[2].id) is not None
+
+    def test_cleanup_orphaned_entries_removes_all_orphans(self, manager, temp_dir):
+        """Test cleanup_orphaned_entries removes all orphaned entries."""
+        # Create and quarantine some files
+        entries = []
+        for i in range(3):
+            file_path = os.path.join(temp_dir, f"test_{i}.exe")
+            with open(file_path, "wb") as f:
+                f.write(b"Test content")
+            result = manager.quarantine_file(file_path, f"Threat{i}")
+            entries.append(result.entry)
+
+        # Remove all quarantine files to create orphans
+        for entry in entries:
+            Path(entry.quarantine_path).unlink()
+
+        removed = manager.cleanup_orphaned_entries()
+        assert removed == 3
+        assert len(manager.get_all_entries()) == 0
+
+    def test_cleanup_orphaned_entries_logs_warning(self, manager, temp_dir, caplog):
+        """Test cleanup_orphaned_entries logs warnings for removed entries."""
+        import logging
+
+        # Create and quarantine a file
+        file_path = os.path.join(temp_dir, "test.exe")
+        with open(file_path, "wb") as f:
+            f.write(b"Test content")
+        result = manager.quarantine_file(file_path, "TestThreat")
+
+        # Remove the quarantine file
+        Path(result.entry.quarantine_path).unlink()
+
+        with caplog.at_level(logging.WARNING, logger="src.core.quarantine.manager"):
+            removed = manager.cleanup_orphaned_entries()
+
+        assert removed == 1
+        assert any("orphaned" in record.message.lower() for record in caplog.records)
+
+
+class TestQuarantineManagerDbFailureAfterRestore:
+    """Tests for handling database failures after file restore/delete operations."""
+
+    @pytest.fixture
+    def temp_dir(self):
+        """Create a temporary directory for quarantine operations."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            yield tmpdir
+
+    @pytest.fixture
+    def manager(self, temp_dir):
+        """Create a QuarantineManager with temporary directories."""
+        quarantine_dir = os.path.join(temp_dir, "quarantine")
+        db_path = os.path.join(temp_dir, "quarantine.db")
+        mgr = QuarantineManager(
+            quarantine_directory=quarantine_dir,
+            database_path=db_path,
+            enable_periodic_cleanup=False,
+        )
+        yield mgr
+        mgr._database.close()
+
+    @pytest.fixture
+    def quarantined_file(self, manager, temp_dir):
+        """Create and quarantine a test file."""
+        file_path = os.path.join(temp_dir, "files", "test.exe")
+        os.makedirs(os.path.dirname(file_path), exist_ok=True)
+        with open(file_path, "wb") as f:
+            f.write(b"Test content for DB failure testing")
+
+        result = manager.quarantine_file(file_path, "TestThreat")
+        assert result.is_success is True
+        return result.entry
+
+    def test_restore_logs_warning_on_db_failure(self, manager, quarantined_file, caplog):
+        """Test that restore logs warning when remove_entry fails."""
+        import logging
+        from unittest.mock import patch
+
+        # Mock remove_entry to fail
+        with (
+            caplog.at_level(logging.WARNING, logger="src.core.quarantine.manager"),
+            patch.object(manager._database, "remove_entry", return_value=False),
+        ):
+            result = manager.restore_file(quarantined_file.id)
+
+        # Restore should still succeed
+        assert result.is_success is True
+
+        # File should be restored
+        assert Path(quarantined_file.original_path).exists()
+
+        # Warning should be logged
+        assert any(
+            "Failed to remove database entry" in record.message
+            and "restore" in record.message.lower()
+            for record in caplog.records
+        )
+
+    def test_delete_logs_warning_on_db_failure(self, manager, quarantined_file, caplog):
+        """Test that delete logs warning when remove_entry fails."""
+        import logging
+        from unittest.mock import patch
+
+        quarantine_path = Path(quarantined_file.quarantine_path)
+
+        # Mock remove_entry to fail
+        with (
+            caplog.at_level(logging.WARNING, logger="src.core.quarantine.manager"),
+            patch.object(manager._database, "remove_entry", return_value=False),
+        ):
+            result = manager.delete_file(quarantined_file.id)
+
+        # Delete should still succeed
+        assert result.is_success is True
+
+        # File should be deleted
+        assert not quarantine_path.exists()
+
+        # Warning should be logged
+        assert any(
+            "Failed to remove database entry" in record.message
+            and "deletion" in record.message.lower()
+            for record in caplog.records
+        )
+
+    def test_cleanup_fixes_orphaned_entry_after_restore_db_failure(self, manager, quarantined_file):
+        """Test that cleanup_orphaned_entries fixes state after restore DB failure."""
+        from unittest.mock import patch
+
+        # Simulate DB failure during restore
+        with patch.object(manager._database, "remove_entry", return_value=False):
+            result = manager.restore_file(quarantined_file.id)
+
+        assert result.is_success is True
+
+        # Entry still exists in DB (orphaned)
+        assert manager.get_entry(quarantined_file.id) is not None
+
+        # File was restored (no longer in quarantine)
+        assert not Path(quarantined_file.quarantine_path).exists()
+
+        # Cleanup should remove the orphaned entry
+        removed = manager.cleanup_orphaned_entries()
+        assert removed == 1
+
+        # Entry should now be gone
+        assert manager.get_entry(quarantined_file.id) is None
+
+    def test_cleanup_fixes_orphaned_entry_after_delete_db_failure(self, manager, quarantined_file):
+        """Test that cleanup_orphaned_entries fixes state after delete DB failure."""
+        from unittest.mock import patch
+
+        # Simulate DB failure during delete
+        with patch.object(manager._database, "remove_entry", return_value=False):
+            result = manager.delete_file(quarantined_file.id)
+
+        assert result.is_success is True
+
+        # Entry still exists in DB (orphaned)
+        assert manager.get_entry(quarantined_file.id) is not None
+
+        # File was deleted from quarantine
+        assert not Path(quarantined_file.quarantine_path).exists()
+
+        # Cleanup should remove the orphaned entry
+        removed = manager.cleanup_orphaned_entries()
+        assert removed == 1
+
+        # Entry should now be gone
+        assert manager.get_entry(quarantined_file.id) is None
+
+
+class TestQuarantineManagerPeriodicCleanup:
+    """Tests for periodic cleanup functionality."""
+
+    @pytest.fixture
+    def temp_dir(self):
+        """Create a temporary directory for quarantine operations."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            yield tmpdir
+
+    def test_periodic_cleanup_disabled_by_default_in_tests(self, temp_dir):
+        """Test that periodic cleanup can be disabled."""
+        quarantine_dir = os.path.join(temp_dir, "quarantine")
+        db_path = os.path.join(temp_dir, "quarantine.db")
+        mgr = QuarantineManager(
+            quarantine_directory=quarantine_dir,
+            database_path=db_path,
+            enable_periodic_cleanup=False,
+        )
+
+        assert mgr._enable_periodic_cleanup is False
+        assert mgr._should_run_periodic_cleanup() is False
+        mgr._database.close()
+
+    def test_periodic_cleanup_enabled_when_requested(self, temp_dir):
+        """Test that periodic cleanup can be enabled."""
+        quarantine_dir = os.path.join(temp_dir, "quarantine")
+        db_path = os.path.join(temp_dir, "quarantine.db")
+        mgr = QuarantineManager(
+            quarantine_directory=quarantine_dir,
+            database_path=db_path,
+            enable_periodic_cleanup=True,
+        )
+
+        assert mgr._enable_periodic_cleanup is True
+        mgr._database.close()
+
+    def test_should_run_cleanup_when_never_run(self, temp_dir):
+        """Test that cleanup should run if never run before."""
+        quarantine_dir = os.path.join(temp_dir, "quarantine")
+        db_path = os.path.join(temp_dir, "quarantine.db")
+        mgr = QuarantineManager(
+            quarantine_directory=quarantine_dir,
+            database_path=db_path,
+            enable_periodic_cleanup=True,
+        )
+
+        # Should run when never run before (no timestamp file)
+        assert mgr._should_run_periodic_cleanup() is True
+        mgr._database.close()
+
+    def test_should_not_run_cleanup_when_recently_run(self, temp_dir):
+        """Test that cleanup should not run if recently run."""
+        quarantine_dir = os.path.join(temp_dir, "quarantine")
+        db_path = os.path.join(temp_dir, "quarantine.db")
+        mgr = QuarantineManager(
+            quarantine_directory=quarantine_dir,
+            database_path=db_path,
+            enable_periodic_cleanup=True,
+        )
+
+        # Set timestamp to now (simulating recent cleanup)
+        mgr._set_last_cleanup_timestamp()
+
+        # Reset the throttle timer so we can check immediately
+        mgr._last_cleanup_check_time = 0.0
+
+        # Should not run when recently run
+        assert mgr._should_run_periodic_cleanup() is False
+        mgr._database.close()
+
+    def test_should_run_cleanup_when_interval_passed(self, temp_dir):
+        """Test that cleanup should run after interval has passed."""
+        import time
+
+        quarantine_dir = os.path.join(temp_dir, "quarantine")
+        db_path = os.path.join(temp_dir, "quarantine.db")
+        mgr = QuarantineManager(
+            quarantine_directory=quarantine_dir,
+            database_path=db_path,
+            enable_periodic_cleanup=True,
+        )
+
+        # Set timestamp to 25 hours ago
+        old_timestamp = time.time() - (25 * 3600)
+        mgr._cleanup_timestamp_file.parent.mkdir(parents=True, exist_ok=True)
+        mgr._cleanup_timestamp_file.write_text(str(old_timestamp))
+
+        # Should run when interval has passed
+        assert mgr._should_run_periodic_cleanup() is True
+        mgr._database.close()
+
+    def test_maybe_run_periodic_cleanup_removes_orphans(self, temp_dir):
+        """Test that maybe_run_periodic_cleanup removes orphaned entries."""
+        import time
+
+        quarantine_dir = os.path.join(temp_dir, "quarantine")
+        db_path = os.path.join(temp_dir, "quarantine.db")
+        mgr = QuarantineManager(
+            quarantine_directory=quarantine_dir,
+            database_path=db_path,
+            enable_periodic_cleanup=True,
+        )
+
+        # Create and quarantine a file
+        file_path = os.path.join(temp_dir, "test.exe")
+        with open(file_path, "wb") as f:
+            f.write(b"Test content")
+        result = mgr.quarantine_file(file_path, "TestThreat")
+        assert result.is_success is True
+
+        # Manually remove the quarantine file to create an orphan
+        Path(result.entry.quarantine_path).unlink()
+
+        # Set old timestamp to trigger cleanup
+        old_timestamp = time.time() - (25 * 3600)
+        mgr._cleanup_timestamp_file.write_text(str(old_timestamp))
+
+        # Run periodic cleanup
+        removed = mgr.maybe_run_periodic_cleanup()
+        assert removed == 1
+
+        # Entry should be gone
+        assert mgr.get_entry(result.entry.id) is None
+        mgr._database.close()
+
+    def test_get_all_entries_triggers_periodic_cleanup(self, temp_dir):
+        """Test that get_all_entries triggers periodic cleanup."""
+        import time
+
+        quarantine_dir = os.path.join(temp_dir, "quarantine")
+        db_path = os.path.join(temp_dir, "quarantine.db")
+        mgr = QuarantineManager(
+            quarantine_directory=quarantine_dir,
+            database_path=db_path,
+            enable_periodic_cleanup=True,
+        )
+
+        # Create and quarantine a file
+        file_path = os.path.join(temp_dir, "test.exe")
+        with open(file_path, "wb") as f:
+            f.write(b"Test content")
+        result = mgr.quarantine_file(file_path, "TestThreat")
+        assert result.is_success is True
+        entry_id = result.entry.id
+
+        # Manually remove the quarantine file to create an orphan
+        Path(result.entry.quarantine_path).unlink()
+
+        # Set old timestamp to trigger cleanup on next get_all_entries
+        old_timestamp = time.time() - (25 * 3600)
+        mgr._cleanup_timestamp_file.write_text(str(old_timestamp))
+
+        # get_all_entries should trigger cleanup and return empty list
+        entries = mgr.get_all_entries()
+        assert len(entries) == 0
+
+        # Entry should be gone
+        assert mgr.get_entry(entry_id) is None
+        mgr._database.close()
+
+    def test_cleanup_timestamp_persists(self, temp_dir):
+        """Test that cleanup timestamp is persisted to disk."""
+        import time
+
+        quarantine_dir = os.path.join(temp_dir, "quarantine")
+        db_path = os.path.join(temp_dir, "quarantine.db")
+        mgr = QuarantineManager(
+            quarantine_directory=quarantine_dir,
+            database_path=db_path,
+            enable_periodic_cleanup=True,
+        )
+
+        # Record cleanup time
+        before = time.time()
+        mgr._set_last_cleanup_timestamp()
+        after = time.time()
+
+        # Read back timestamp
+        timestamp = mgr._get_last_cleanup_timestamp()
+        assert before <= timestamp <= after
+
+        # Create new manager instance - timestamp should persist
+        mgr._database.close()
+        mgr2 = QuarantineManager(
+            quarantine_directory=quarantine_dir,
+            database_path=db_path,
+            enable_periodic_cleanup=True,
+        )
+
+        timestamp2 = mgr2._get_last_cleanup_timestamp()
+        assert timestamp2 == timestamp
+        mgr2._database.close()
+
+    def test_throttle_prevents_frequent_checks(self, temp_dir):
+        """Test that checks are throttled to prevent excessive disk I/O."""
+        quarantine_dir = os.path.join(temp_dir, "quarantine")
+        db_path = os.path.join(temp_dir, "quarantine.db")
+        mgr = QuarantineManager(
+            quarantine_directory=quarantine_dir,
+            database_path=db_path,
+            enable_periodic_cleanup=True,
+        )
+
+        # First check should work
+        result1 = mgr._should_run_periodic_cleanup()
+        assert result1 is True  # Never run before
+
+        # Immediate second check should be throttled (returns False due to throttle)
+        result2 = mgr._should_run_periodic_cleanup()
+        assert result2 is False  # Throttled
+
+        mgr._database.close()
