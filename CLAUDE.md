@@ -406,12 +406,14 @@ flatpak_pip_generator \
     --checker-data
 
 # 2. Update requirements-runtime-pinned.txt with new versions
-#    Then generate runtime dependencies (uses req2flatpak for binary wheels)
+#    Then generate runtime dependencies for BOTH architectures (x86_64 and aarch64)
 req2flatpak \
     -r requirements-runtime-pinned.txt \
-    -t 312-x86_64 \
+    -t 312-x86_64 312-aarch64 \
     -o python3-runtime-deps.json
 ```
+
+**Note:** The `-t` flag accepts multiple space-separated targets. Using `312-x86_64 312-aarch64` generates a single JSON file with architecture-specific entries for binary wheels and shared entries for pure Python wheels.
 
 ### Testing Flatpak Build
 
