@@ -105,6 +105,7 @@ class TestQuarantineManager:
         mgr = QuarantineManager(
             quarantine_directory=quarantine_dir,
             database_path=db_path,
+            enable_periodic_cleanup=False,  # Disable for faster tests
         )
         yield mgr
         mgr._database.close()
@@ -124,6 +125,7 @@ class TestQuarantineManager:
         mgr = QuarantineManager(
             quarantine_directory=quarantine_dir,
             database_path=db_path,
+            enable_periodic_cleanup=False,
         )
         assert Path(quarantine_dir).exists()
         mgr._database.close()
@@ -251,6 +253,7 @@ class TestQuarantineManagerRestore:
         mgr = QuarantineManager(
             quarantine_directory=quarantine_dir,
             database_path=db_path,
+            enable_periodic_cleanup=False,
         )
         yield mgr
         mgr._database.close()
@@ -433,6 +436,7 @@ class TestQuarantineManagerPermissions:
         mgr = QuarantineManager(
             quarantine_directory=quarantine_dir,
             database_path=db_path,
+            enable_periodic_cleanup=False,
         )
         yield mgr
         mgr._database.close()
@@ -768,6 +772,7 @@ class TestQuarantineManagerQueries:
         mgr = QuarantineManager(
             quarantine_directory=quarantine_dir,
             database_path=db_path,
+            enable_periodic_cleanup=False,
         )
         yield mgr
         mgr._database.close()
@@ -867,6 +872,7 @@ class TestQuarantineManagerCleanupOrphaned:
         mgr = QuarantineManager(
             quarantine_directory=quarantine_dir,
             database_path=db_path,
+            enable_periodic_cleanup=False,
         )
         yield mgr
         mgr._database.close()
@@ -968,6 +974,7 @@ class TestQuarantineManagerDbFailureAfterRestore:
         mgr = QuarantineManager(
             quarantine_directory=quarantine_dir,
             database_path=db_path,
+            enable_periodic_cleanup=False,
         )
         yield mgr
         mgr._database.close()
@@ -1081,3 +1088,217 @@ class TestQuarantineManagerDbFailureAfterRestore:
 
         # Entry should now be gone
         assert manager.get_entry(quarantined_file.id) is None
+
+
+class TestQuarantineManagerPeriodicCleanup:
+    """Tests for periodic cleanup functionality."""
+
+    @pytest.fixture
+    def temp_dir(self):
+        """Create a temporary directory for quarantine operations."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            yield tmpdir
+
+    def test_periodic_cleanup_disabled_by_default_in_tests(self, temp_dir):
+        """Test that periodic cleanup can be disabled."""
+        quarantine_dir = os.path.join(temp_dir, "quarantine")
+        db_path = os.path.join(temp_dir, "quarantine.db")
+        mgr = QuarantineManager(
+            quarantine_directory=quarantine_dir,
+            database_path=db_path,
+            enable_periodic_cleanup=False,
+        )
+
+        assert mgr._enable_periodic_cleanup is False
+        assert mgr._should_run_periodic_cleanup() is False
+        mgr._database.close()
+
+    def test_periodic_cleanup_enabled_when_requested(self, temp_dir):
+        """Test that periodic cleanup can be enabled."""
+        quarantine_dir = os.path.join(temp_dir, "quarantine")
+        db_path = os.path.join(temp_dir, "quarantine.db")
+        mgr = QuarantineManager(
+            quarantine_directory=quarantine_dir,
+            database_path=db_path,
+            enable_periodic_cleanup=True,
+        )
+
+        assert mgr._enable_periodic_cleanup is True
+        mgr._database.close()
+
+    def test_should_run_cleanup_when_never_run(self, temp_dir):
+        """Test that cleanup should run if never run before."""
+        quarantine_dir = os.path.join(temp_dir, "quarantine")
+        db_path = os.path.join(temp_dir, "quarantine.db")
+        mgr = QuarantineManager(
+            quarantine_directory=quarantine_dir,
+            database_path=db_path,
+            enable_periodic_cleanup=True,
+        )
+
+        # Should run when never run before (no timestamp file)
+        assert mgr._should_run_periodic_cleanup() is True
+        mgr._database.close()
+
+    def test_should_not_run_cleanup_when_recently_run(self, temp_dir):
+        """Test that cleanup should not run if recently run."""
+        quarantine_dir = os.path.join(temp_dir, "quarantine")
+        db_path = os.path.join(temp_dir, "quarantine.db")
+        mgr = QuarantineManager(
+            quarantine_directory=quarantine_dir,
+            database_path=db_path,
+            enable_periodic_cleanup=True,
+        )
+
+        # Set timestamp to now (simulating recent cleanup)
+        mgr._set_last_cleanup_timestamp()
+
+        # Reset the throttle timer so we can check immediately
+        mgr._last_cleanup_check_time = 0.0
+
+        # Should not run when recently run
+        assert mgr._should_run_periodic_cleanup() is False
+        mgr._database.close()
+
+    def test_should_run_cleanup_when_interval_passed(self, temp_dir):
+        """Test that cleanup should run after interval has passed."""
+        import time
+
+        quarantine_dir = os.path.join(temp_dir, "quarantine")
+        db_path = os.path.join(temp_dir, "quarantine.db")
+        mgr = QuarantineManager(
+            quarantine_directory=quarantine_dir,
+            database_path=db_path,
+            enable_periodic_cleanup=True,
+        )
+
+        # Set timestamp to 25 hours ago
+        old_timestamp = time.time() - (25 * 3600)
+        mgr._cleanup_timestamp_file.parent.mkdir(parents=True, exist_ok=True)
+        mgr._cleanup_timestamp_file.write_text(str(old_timestamp))
+
+        # Should run when interval has passed
+        assert mgr._should_run_periodic_cleanup() is True
+        mgr._database.close()
+
+    def test_maybe_run_periodic_cleanup_removes_orphans(self, temp_dir):
+        """Test that maybe_run_periodic_cleanup removes orphaned entries."""
+        import time
+
+        quarantine_dir = os.path.join(temp_dir, "quarantine")
+        db_path = os.path.join(temp_dir, "quarantine.db")
+        mgr = QuarantineManager(
+            quarantine_directory=quarantine_dir,
+            database_path=db_path,
+            enable_periodic_cleanup=True,
+        )
+
+        # Create and quarantine a file
+        file_path = os.path.join(temp_dir, "test.exe")
+        with open(file_path, "wb") as f:
+            f.write(b"Test content")
+        result = mgr.quarantine_file(file_path, "TestThreat")
+        assert result.is_success is True
+
+        # Manually remove the quarantine file to create an orphan
+        Path(result.entry.quarantine_path).unlink()
+
+        # Set old timestamp to trigger cleanup
+        old_timestamp = time.time() - (25 * 3600)
+        mgr._cleanup_timestamp_file.write_text(str(old_timestamp))
+
+        # Run periodic cleanup
+        removed = mgr.maybe_run_periodic_cleanup()
+        assert removed == 1
+
+        # Entry should be gone
+        assert mgr.get_entry(result.entry.id) is None
+        mgr._database.close()
+
+    def test_get_all_entries_triggers_periodic_cleanup(self, temp_dir):
+        """Test that get_all_entries triggers periodic cleanup."""
+        import time
+
+        quarantine_dir = os.path.join(temp_dir, "quarantine")
+        db_path = os.path.join(temp_dir, "quarantine.db")
+        mgr = QuarantineManager(
+            quarantine_directory=quarantine_dir,
+            database_path=db_path,
+            enable_periodic_cleanup=True,
+        )
+
+        # Create and quarantine a file
+        file_path = os.path.join(temp_dir, "test.exe")
+        with open(file_path, "wb") as f:
+            f.write(b"Test content")
+        result = mgr.quarantine_file(file_path, "TestThreat")
+        assert result.is_success is True
+        entry_id = result.entry.id
+
+        # Manually remove the quarantine file to create an orphan
+        Path(result.entry.quarantine_path).unlink()
+
+        # Set old timestamp to trigger cleanup on next get_all_entries
+        old_timestamp = time.time() - (25 * 3600)
+        mgr._cleanup_timestamp_file.write_text(str(old_timestamp))
+
+        # get_all_entries should trigger cleanup and return empty list
+        entries = mgr.get_all_entries()
+        assert len(entries) == 0
+
+        # Entry should be gone
+        assert mgr.get_entry(entry_id) is None
+        mgr._database.close()
+
+    def test_cleanup_timestamp_persists(self, temp_dir):
+        """Test that cleanup timestamp is persisted to disk."""
+        import time
+
+        quarantine_dir = os.path.join(temp_dir, "quarantine")
+        db_path = os.path.join(temp_dir, "quarantine.db")
+        mgr = QuarantineManager(
+            quarantine_directory=quarantine_dir,
+            database_path=db_path,
+            enable_periodic_cleanup=True,
+        )
+
+        # Record cleanup time
+        before = time.time()
+        mgr._set_last_cleanup_timestamp()
+        after = time.time()
+
+        # Read back timestamp
+        timestamp = mgr._get_last_cleanup_timestamp()
+        assert before <= timestamp <= after
+
+        # Create new manager instance - timestamp should persist
+        mgr._database.close()
+        mgr2 = QuarantineManager(
+            quarantine_directory=quarantine_dir,
+            database_path=db_path,
+            enable_periodic_cleanup=True,
+        )
+
+        timestamp2 = mgr2._get_last_cleanup_timestamp()
+        assert timestamp2 == timestamp
+        mgr2._database.close()
+
+    def test_throttle_prevents_frequent_checks(self, temp_dir):
+        """Test that checks are throttled to prevent excessive disk I/O."""
+        quarantine_dir = os.path.join(temp_dir, "quarantine")
+        db_path = os.path.join(temp_dir, "quarantine.db")
+        mgr = QuarantineManager(
+            quarantine_directory=quarantine_dir,
+            database_path=db_path,
+            enable_periodic_cleanup=True,
+        )
+
+        # First check should work
+        result1 = mgr._should_run_periodic_cleanup()
+        assert result1 is True  # Never run before
+
+        # Immediate second check should be throttled (returns False due to throttle)
+        result2 = mgr._should_run_periodic_cleanup()
+        assert result2 is False  # Throttled
+
+        mgr._database.close()
