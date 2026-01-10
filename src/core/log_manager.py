@@ -138,6 +138,7 @@ import json
 import logging
 import os
 import random
+import re
 import subprocess
 import tempfile
 import threading
@@ -154,6 +155,63 @@ from .sanitize import sanitize_log_line, sanitize_log_text
 from .utils import is_flatpak, which_host_command, wrap_host_command
 
 logger = logging.getLogger(__name__)
+
+# Regex patterns for extracting index fields from JSON without full parsing.
+# These patterns match JSON key-value pairs in the format: "key": "value"
+# They are designed to work with json.dump() output (indent=2).
+_INDEX_FIELD_PATTERN = re.compile(r'"(id|timestamp|type)"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*)"')
+
+# Maximum bytes to read when extracting index fields.
+# Log files store id, timestamp, type near the top. With indent=2 formatting:
+# - Opening brace + newline: ~2 bytes
+# - "id": "uuid" line: ~50 bytes (UUID is 36 chars)
+# - "timestamp": "iso" line: ~45 bytes (ISO timestamp ~26 chars)
+# - "type": "scan|update" line: ~25 bytes
+# Total ~122 bytes minimum. Using 512 bytes provides safety margin for
+# whitespace variations and ensures we capture all three fields.
+_INDEX_EXTRACT_MAX_BYTES = 512
+
+
+def _extract_index_fields(file_path: Path) -> dict[str, str] | None:
+    """
+    Extract index fields (id, timestamp, type) from a log file without full JSON parsing.
+
+    This function reads only the first portion of the log file and uses regex
+    to extract the required fields, avoiding the overhead of parsing the entire
+    JSON structure including potentially large 'details' and 'summary' fields.
+
+    Args:
+        file_path: Path to the JSON log file
+
+    Returns:
+        Dict with 'id', 'timestamp', 'type' keys if all found, None otherwise
+    """
+    try:
+        with open(file_path, encoding="utf-8") as f:
+            # Read only the beginning of the file where index fields are located
+            content = f.read(_INDEX_EXTRACT_MAX_BYTES)
+
+        # Extract all matching fields
+        matches = _INDEX_FIELD_PATTERN.findall(content)
+        if not matches:
+            return None
+
+        # Build result dict from matches
+        result = {}
+        for key, value in matches:
+            # Decode JSON escape sequences (e.g., \n, \", \\)
+            try:
+                result[key] = json.loads(f'"{value}"')
+            except json.JSONDecodeError:
+                result[key] = value
+
+        # Return only if all required fields are present
+        if "id" in result and "timestamp" in result and "type" in result:
+            return result
+
+        return None
+    except (OSError, UnicodeDecodeError):
+        return None
 
 
 class LogType(Enum):
@@ -642,6 +700,10 @@ class LogManager:
         Internal method for use by callers that already hold the lock.
         Scans all log files and builds index data structure.
 
+        Uses optimized partial file reading with regex extraction to avoid
+        parsing entire JSON files. Falls back to full JSON parsing if the
+        optimized extraction fails (e.g., for non-standard file formats).
+
         Returns:
             Index data dict with "version" and "entries" keys
         """
@@ -657,6 +719,19 @@ class LogManager:
             if log_file.name == INDEX_FILENAME:
                 continue
 
+            # Try optimized extraction first (reads only first 512 bytes)
+            fields = _extract_index_fields(log_file)
+            if fields:
+                entries.append(
+                    {
+                        "id": fields["id"],
+                        "timestamp": fields["timestamp"],
+                        "type": fields["type"],
+                    }
+                )
+                continue
+
+            # Fall back to full JSON parsing for non-standard files
             try:
                 with open(log_file, encoding="utf-8") as f:
                     data = json.load(f)

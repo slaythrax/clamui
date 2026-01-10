@@ -5039,3 +5039,223 @@ class TestLogManagerExport:
             assert data["entries"][1]["type"] == "update"
             assert data["entries"][2]["type"] == "scan"
             assert data["entries"][2]["scheduled"] is True
+
+
+class TestExtractIndexFields:
+    """Tests for the optimized _extract_index_fields function."""
+
+    def test_extract_from_standard_log_file(self, tmp_path):
+        """Test extraction from a standard JSON log file."""
+        from src.core.log_manager import _extract_index_fields
+
+        log_file = tmp_path / "test.json"
+        log_data = {
+            "id": "test-uuid-123",
+            "timestamp": "2024-01-15T10:30:00",
+            "type": "scan",
+            "status": "clean",
+            "summary": "Test scan completed",
+            "details": "x" * 10000,  # Large details field
+        }
+        with open(log_file, "w", encoding="utf-8") as f:
+            json.dump(log_data, f, indent=2)
+
+        result = _extract_index_fields(log_file)
+
+        assert result is not None
+        assert result["id"] == "test-uuid-123"
+        assert result["timestamp"] == "2024-01-15T10:30:00"
+        assert result["type"] == "scan"
+
+    def test_extract_handles_escaped_characters(self, tmp_path):
+        """Test extraction handles JSON escape sequences correctly."""
+        from src.core.log_manager import _extract_index_fields
+
+        log_file = tmp_path / "escaped.json"
+        # Manually create JSON with escape sequences in values
+        content = """{
+  "id": "test-id-with\\"quote",
+  "timestamp": "2024-01-15T10:30:00",
+  "type": "scan"
+}"""
+        log_file.write_text(content, encoding="utf-8")
+
+        result = _extract_index_fields(log_file)
+
+        assert result is not None
+        assert result["id"] == 'test-id-with"quote'
+        assert result["type"] == "scan"
+
+    def test_extract_returns_none_for_missing_fields(self, tmp_path):
+        """Test extraction returns None when required fields are missing."""
+        from src.core.log_manager import _extract_index_fields
+
+        log_file = tmp_path / "incomplete.json"
+        # Missing 'type' field
+        log_data = {
+            "id": "test-uuid-123",
+            "timestamp": "2024-01-15T10:30:00",
+            "status": "clean",
+        }
+        with open(log_file, "w", encoding="utf-8") as f:
+            json.dump(log_data, f, indent=2)
+
+        result = _extract_index_fields(log_file)
+        assert result is None
+
+    def test_extract_returns_none_for_corrupted_file(self, tmp_path):
+        """Test extraction returns None for corrupted JSON."""
+        from src.core.log_manager import _extract_index_fields
+
+        log_file = tmp_path / "corrupted.json"
+        log_file.write_text("{ invalid json }", encoding="utf-8")
+
+        result = _extract_index_fields(log_file)
+        assert result is None
+
+    def test_extract_returns_none_for_nonexistent_file(self, tmp_path):
+        """Test extraction returns None for non-existent files."""
+        from src.core.log_manager import _extract_index_fields
+
+        log_file = tmp_path / "nonexistent.json"
+
+        result = _extract_index_fields(log_file)
+        assert result is None
+
+    def test_extract_handles_compact_json(self, tmp_path):
+        """Test extraction works with compact (non-indented) JSON."""
+        from src.core.log_manager import _extract_index_fields
+
+        log_file = tmp_path / "compact.json"
+        log_data = {
+            "id": "compact-uuid",
+            "timestamp": "2024-01-15T10:30:00",
+            "type": "update",
+        }
+        with open(log_file, "w", encoding="utf-8") as f:
+            json.dump(log_data, f)  # No indent
+
+        result = _extract_index_fields(log_file)
+
+        assert result is not None
+        assert result["id"] == "compact-uuid"
+        assert result["type"] == "update"
+
+    def test_extract_handles_all_log_types(self, tmp_path):
+        """Test extraction works for all log types."""
+        from src.core.log_manager import _extract_index_fields
+
+        for log_type in ["scan", "update", "virustotal"]:
+            log_file = tmp_path / f"{log_type}_test.json"
+            log_data = {
+                "id": f"{log_type}-uuid",
+                "timestamp": "2024-01-15T10:30:00",
+                "type": log_type,
+            }
+            with open(log_file, "w", encoding="utf-8") as f:
+                json.dump(log_data, f, indent=2)
+
+            result = _extract_index_fields(log_file)
+
+            assert result is not None
+            assert result["type"] == log_type
+
+
+class TestIndexRebuildPerformance:
+    """Tests for index rebuild performance with optimized extraction."""
+
+    @pytest.fixture
+    def log_manager_with_many_logs(self, tmp_path):
+        """Create a log manager with many log files for benchmarking."""
+        log_dir = tmp_path / "logs"
+        log_dir.mkdir()
+
+        manager = LogManager(str(log_dir))
+
+        # Create 100 log files with varying sizes
+        for i in range(100):
+            log_file = log_dir / f"log-{i:04d}.json"
+            # Vary the details size to simulate real-world logs
+            details_size = (i % 10) * 1000  # 0 to 9000 chars
+            log_data = {
+                "id": f"uuid-{i:04d}",
+                "timestamp": f"2024-01-{(i % 28) + 1:02d}T10:30:00",
+                "type": "scan" if i % 2 == 0 else "update",
+                "status": "clean",
+                "summary": f"Test log entry {i}",
+                "details": "x" * details_size,
+                "path": f"/test/path/{i}",
+                "duration": float(i),
+            }
+            with open(log_file, "w", encoding="utf-8") as f:
+                json.dump(log_data, f, indent=2)
+
+        return manager
+
+    def test_rebuild_index_processes_all_files(self, log_manager_with_many_logs):
+        """Test that rebuild_index correctly processes all log files."""
+        result = log_manager_with_many_logs.rebuild_index()
+
+        assert result is True
+
+        index = log_manager_with_many_logs._load_index()
+        assert len(index["entries"]) == 100
+
+        # Verify entries have correct structure
+        for entry in index["entries"]:
+            assert "id" in entry
+            assert "timestamp" in entry
+            assert "type" in entry
+            assert entry["type"] in ("scan", "update")
+
+    def test_rebuild_index_uses_optimized_extraction(self, tmp_path):
+        """Test that rebuild_index uses optimized extraction for standard files."""
+        from src.core.log_manager import _extract_index_fields
+
+        log_dir = tmp_path / "logs"
+        log_dir.mkdir()
+
+        # Create a log file with large details field
+        log_file = log_dir / "large-log.json"
+        log_data = {
+            "id": "large-uuid",
+            "timestamp": "2024-01-15T10:30:00",
+            "type": "scan",
+            "status": "clean",
+            "summary": "Test",
+            "details": "x" * 100000,  # 100KB of details
+        }
+        with open(log_file, "w", encoding="utf-8") as f:
+            json.dump(log_data, f, indent=2)
+
+        # Verify optimized extraction works on large file
+        result = _extract_index_fields(log_file)
+        assert result is not None
+        assert result["id"] == "large-uuid"
+
+        # Verify file size is large but extraction only reads first portion
+        file_size = log_file.stat().st_size
+        assert file_size > 100000  # File is over 100KB
+
+    def test_rebuild_falls_back_to_full_parsing(self, tmp_path):
+        """Test that rebuild_index falls back to full parsing when needed."""
+        log_dir = tmp_path / "logs"
+        log_dir.mkdir()
+
+        # Create a file where fields appear after 512 bytes
+        # (beyond the optimized extraction read limit)
+        log_file = log_dir / "late-fields.json"
+        # Put padding at the start by having a very long first field
+        content = '{\n  "padding": "' + "x" * 600 + '",\n'
+        content += '  "id": "late-uuid",\n'
+        content += '  "timestamp": "2024-01-15T10:30:00",\n'
+        content += '  "type": "scan"\n}'
+        log_file.write_text(content, encoding="utf-8")
+
+        manager = LogManager(str(log_dir))
+        result = manager.rebuild_index()
+
+        assert result is True
+        index = manager._load_index()
+        assert len(index["entries"]) == 1
+        assert index["entries"][0]["id"] == "late-uuid"
