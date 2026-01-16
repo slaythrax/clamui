@@ -1,6 +1,6 @@
 app-id: io.github.linx_systems.ClamUI
 runtime: org.gnome.Platform
-runtime-version: '49'
+runtime-version: "49"
 sdk: org.gnome.Sdk
 sdk-extensions:
   - org.freedesktop.Sdk.Extension.rust-stable
@@ -16,17 +16,61 @@ finish-args:
   # Network for virus database updates
   - --share=network
 
-  # Specific D-Bus permissions (instead of full session-bus)
+  # D-Bus permissions for notifications
   - --talk-name=org.freedesktop.Notifications
-  # XApp StatusIcon for Cinnamon/MATE/XFCE system tray
-  - --own-name=org.x.StatusIcon.*
+
+  # StatusNotifierItem (SNI) system tray protocol
+  # Allows the tray service to register on D-Bus and communicate with
+  # desktop environment tray watchers (KDE, Cinnamon, MATE, XFCE, Budgie)
+  - --own-name=org.kde.StatusNotifierItem-clamui-1
+  - --talk-name=org.kde.StatusNotifierWatcher
+  - --talk-name=org.x.StatusNotifierWatcher
+  - --talk-name=org.freedesktop.StatusNotifierWatcher
 
   # GVFS for file browser integration
   - --filesystem=xdg-run/gvfsd
 
 modules:
-  # System tray uses org.x.StatusIcon D-Bus protocol (no GTK3 required)
-  # Supports: Cinnamon, MATE, XFCE, Budgie
+  # System tray uses StatusNotifierItem D-Bus protocol
+
+  # intltool required for building libdbusmenu (even with --disable-nls)
+  - name: intltool
+    cleanup:
+      - "*"
+    sources:
+      - type: archive
+        url: https://launchpad.net/intltool/trunk/0.51.0/+download/intltool-0.51.0.tar.gz
+        sha256: 67c74d94196b153b774ab9f89b2fa6c6ba79352407037c8c14d5aeb334e959cd
+        x-checker-data:
+          type: anitya
+          project-id: 1385
+          url-template: https://launchpad.net/intltool/trunk/$version/+download/intltool-$version.tar.gz
+
+  # libdbusmenu-gtk3 for system tray context menu export via DBusMenu protocol
+  - name: libdbusmenu-gtk3
+    buildsystem: autotools
+    build-options:
+      cflags: -Wno-error
+      env:
+        HAVE_VALGRIND_FALSE: "#"
+        HAVE_VALGRIND_TRUE: ""
+    config-opts:
+      - --with-gtk=3
+      - --disable-dumper
+      - --disable-static
+      - --disable-tests
+      - --disable-nls
+      - --enable-introspection=yes
+    sources:
+      - type: archive
+        url: https://launchpad.net/libdbusmenu/16.04/16.04.0/+download/libdbusmenu-16.04.0.tar.gz
+        sha256: b9cc4a2acd74509435892823607d966d424bd9ad5d0b00938f27240a1bfa878a
+    cleanup:
+      - /include
+      - /libexec
+      - /share/gtk-doc
+      - /share/libdbusmenu
+      - "*.la"
 
   - name: json-c
     buildsystem: cmake-ninja
