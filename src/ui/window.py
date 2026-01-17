@@ -263,7 +263,9 @@ class MainWindow(Adw.ApplicationWindow):
         dialog = CloseBehaviorDialog(callback=self._on_close_behavior_dialog_response)
         dialog.present(self)
 
-    def _on_close_behavior_dialog_response(self, choice: str | None, remember: bool) -> None:
+    def _on_close_behavior_dialog_response(
+        self, choice: str | None, remember: bool
+    ) -> None:
         """
         Handle the close behavior dialog response.
 
@@ -323,6 +325,9 @@ class MainWindow(Adw.ApplicationWindow):
             Configured Adw.HeaderBar
         """
         header_bar = Adw.HeaderBar()
+
+        # Enable window control buttons (minimize, maximize, close)
+        header_bar.set_show_end_title_buttons(True)
 
         # Add title widget
         title_label = Gtk.Label(label="ClamUI")
