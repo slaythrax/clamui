@@ -94,13 +94,22 @@ class ClamAVConfig:
         """
         Set a single value for a configuration key.
 
-        Replaces any existing values for the key.
+        Replaces any existing values for the key. If line_number is 0 (default)
+        and the key already exists, preserves the original line number to ensure
+        in-place updates rather than appends.
 
         Args:
             key: The configuration option name
             value: The value to set
-            line_number: Optional line number for this value
+            line_number: Optional line number for this value (0 = auto-detect)
         """
+        # If line_number not provided, try to preserve existing line number
+        if line_number == 0 and key in self.values:
+            existing_values = self.values[key]
+            if existing_values and existing_values[0].line_number > 0:
+                # Preserve the original line number for in-place update
+                line_number = existing_values[0].line_number
+
         self.values[key] = [ClamAVConfigValue(value=value, line_number=line_number)]
 
     def add_value(self, key: str, value: str, line_number: int = 0) -> None:
@@ -347,7 +356,9 @@ def parse_config(file_path: str) -> tuple[ClamAVConfig | None, str | None]:
         value = parts[1] if len(parts) > 1 else ""
 
         # Add value to config (supports multi-value options)
-        config_value = ClamAVConfigValue(value=value, comment=comment, line_number=line_number)
+        config_value = ClamAVConfigValue(
+            value=value, comment=comment, line_number=line_number
+        )
 
         if key not in config.values:
             config.values[key] = []
@@ -649,10 +660,11 @@ def backup_config(file_path: str) -> None:
 
 def write_config_with_elevation(config: ClamAVConfig) -> tuple[bool, str | None]:
     """
-    Write a configuration file with elevated privileges using pkexec.
+    Write a configuration file with elevated privileges if needed.
 
-    This is needed for system config files like /etc/clamav/*.conf
-    that require root privileges to modify.
+    Automatically detects if the file needs privilege elevation:
+    - User-writable paths (e.g., ~/.config/clamav/ in Flatpak): write directly
+    - System paths (e.g., /etc/clamav/): use pkexec for elevation
 
     Args:
         config: The ClamAVConfig object to write
@@ -666,9 +678,44 @@ def write_config_with_elevation(config: ClamAVConfig) -> tuple[bool, str | None]
         return (False, "No file path specified in config object")
 
     try:
-        # Write config to a temporary file first
         content = config.to_string()
+        file_path = Path(config.file_path)
 
+        # Check if we can write to the directory without elevation
+        parent_dir = file_path.parent
+        needs_elevation = False
+
+        try:
+            # Test if directory is writable
+            if parent_dir.exists():
+                # Check write permission on existing directory
+                test_file = parent_dir / f".write_test_{os.getpid()}"
+                try:
+                    test_file.touch()
+                    test_file.unlink()
+                except (PermissionError, OSError):
+                    needs_elevation = True
+            else:
+                # Directory doesn't exist - check if we can create it
+                try:
+                    parent_dir.mkdir(parents=True, exist_ok=True)
+                except (PermissionError, OSError):
+                    needs_elevation = True
+        except Exception:
+            # If we can't determine, assume elevation is needed
+            needs_elevation = True
+
+        # Try direct write for user-writable paths
+        if not needs_elevation:
+            try:
+                file_path.write_text(content, encoding="utf-8")
+                # Set reasonable permissions for user files
+                file_path.chmod(0o644)
+                return (True, None)
+            except Exception as e:
+                return (False, f"Failed to write config: {str(e)}")
+
+        # System path - need elevation via pkexec
         with tempfile.NamedTemporaryFile(mode="w", suffix=".conf", delete=False) as tmp:
             tmp.write(content)
             tmp_path = tmp.name

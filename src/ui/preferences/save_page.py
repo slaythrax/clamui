@@ -65,9 +65,9 @@ class SavePage(PreferencesPageMixin):
         Initialize the SavePage.
 
         Args:
-            window: Parent PreferencesWindow instance (for dialog presentation)
-            freshclam_config: Parsed freshclam.conf configuration object
-            clamd_config: Parsed clamd.conf configuration object
+            window: Parent PreferencesWindow instance (for dialog presentation and config access)
+            freshclam_config: (Deprecated) Now accessed from window._freshclam_config
+            clamd_config: (Deprecated) Now accessed from window._clamd_config
             freshclam_conf_path: Path to freshclam.conf file
             clamd_conf_path: Path to clamd.conf file
             clamd_available: Whether clamd.conf is available
@@ -77,10 +77,14 @@ class SavePage(PreferencesPageMixin):
             clamd_widgets: Dictionary of clamd form widgets
             onaccess_widgets: Dictionary of on-access form widgets
             scheduled_widgets: Dictionary of scheduled scan form widgets
+
+        Note:
+            SavePage now accesses configs from window._freshclam_config and window._clamd_config
+            to ensure it always has the latest loaded configs (not None from init time).
         """
         self._window = window
-        self._freshclam_config = freshclam_config
-        self._clamd_config = clamd_config
+        # Note: Configs are accessed from window._freshclam_config and window._clamd_config
+        # to ensure we always have the latest loaded configs (not None from init time)
         self._freshclam_conf_path = freshclam_conf_path
         self._clamd_conf_path = clamd_conf_path
         self._clamd_available = clamd_available
@@ -168,7 +172,9 @@ class SavePage(PreferencesPageMixin):
         manual_save_row = Adw.ActionRow()
         manual_save_row.set_title("Manual Save Required")
         manual_save_row.set_title_lines(1)
-        manual_save_row.set_subtitle("Database Updates, Scanner, On-Access, Scheduled Scans")
+        manual_save_row.set_subtitle(
+            "Database Updates, Scanner, On-Access, Scheduled Scans"
+        )
         manual_save_row.set_subtitle_lines(1)
         lock_icon = Gtk.Image.new_from_icon_name("system-lock-screen-symbolic")
         lock_icon.add_css_class("warning")
@@ -219,13 +225,17 @@ class SavePage(PreferencesPageMixin):
 
         # Collect form data from all pages
         freshclam_updates = DatabasePage.collect_data(self._freshclam_widgets)
-        clamd_updates = ScannerPage.collect_data(self._clamd_widgets, self._clamd_available)
-        onaccess_updates = OnAccessPage.collect_data(self._onaccess_widgets, self._clamd_available)
+        clamd_updates = ScannerPage.collect_data(
+            self._clamd_widgets, self._clamd_available
+        )
+        onaccess_updates = OnAccessPage.collect_data(
+            self._onaccess_widgets, self._clamd_available
+        )
         scheduled_updates = ScheduledPage.collect_data(self._scheduled_widgets)
 
         # Validate configurations
         if freshclam_updates:
-            if not self._freshclam_config:
+            if not self._window._freshclam_config:
                 self._show_error_dialog(
                     "Configuration Error",
                     "Cannot save freshclam settings: Configuration failed to load.\n\n"
@@ -239,7 +249,7 @@ class SavePage(PreferencesPageMixin):
                 button.set_sensitive(True)
                 return
 
-            is_valid, errors = validate_config(self._freshclam_config)
+            is_valid, errors = validate_config(self._window._freshclam_config)
             if not is_valid:
                 self._show_error_dialog("Validation Error", "\n".join(errors))
                 self._is_saving = False
@@ -247,7 +257,7 @@ class SavePage(PreferencesPageMixin):
                 return
 
         if clamd_updates and self._clamd_available:
-            if not self._clamd_config:
+            if not self._window._clamd_config:
                 self._show_error_dialog(
                     "Configuration Error",
                     "Cannot save clamd settings: Configuration failed to load.\n\n"
@@ -257,7 +267,7 @@ class SavePage(PreferencesPageMixin):
                 button.set_sensitive(True)
                 return
 
-            is_valid, errors = validate_config(self._clamd_config)
+            is_valid, errors = validate_config(self._window._clamd_config)
             if not is_valid:
                 self._show_error_dialog("Validation Error", "\n".join(errors))
                 self._is_saving = False
@@ -306,23 +316,26 @@ class SavePage(PreferencesPageMixin):
                 backup_config(self._clamd_conf_path)
 
             # Save freshclam.conf
-            if freshclam_updates and self._freshclam_config:
+            if freshclam_updates and self._window._freshclam_config:
                 # Apply updates to config using set_value
                 for key, value in freshclam_updates.items():
-                    self._freshclam_config.set_value(key, value)
-                success, error = write_config_with_elevation(self._freshclam_config)
+                    self._window._freshclam_config.set_value(key, value)
+
+                success, error = write_config_with_elevation(
+                    self._window._freshclam_config
+                )
                 if not success:
                     raise Exception(f"Failed to save freshclam.conf: {error}")
 
             # Save clamd.conf (includes both scanner settings and On-Access settings)
-            if (clamd_updates or onaccess_updates) and self._clamd_config:
+            if (clamd_updates or onaccess_updates) and self._window._clamd_config:
                 # Apply scanner updates to config using set_value
                 for key, value in clamd_updates.items():
-                    self._clamd_config.set_value(key, value)
+                    self._window._clamd_config.set_value(key, value)
                 # Apply On-Access updates to config using set_value
                 for key, value in onaccess_updates.items():
-                    self._clamd_config.set_value(key, value)
-                success, error = write_config_with_elevation(self._clamd_config)
+                    self._window._clamd_config.set_value(key, value)
+                success, error = write_config_with_elevation(self._window._clamd_config)
                 if not success:
                     raise Exception(f"Failed to save clamd.conf: {error}")
 

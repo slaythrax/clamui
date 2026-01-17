@@ -341,8 +341,9 @@ class TestOnAccessPagePopulateFields:
         # Should not raise exception
         OnAccessPage.populate_fields(mock_config, mock_widgets)
 
-        # Should not call any widget setters when keys are missing
-        mock_widgets["OnAccessPrevention"].set_active.assert_not_called()
+        # Should call set_active with default value (False) for missing boolean keys
+        # This is the new behavior - populate_bool_field now sets default values
+        mock_widgets["OnAccessPrevention"].set_active.assert_called_with(False)
 
 
 class TestOnAccessPageCollectData:

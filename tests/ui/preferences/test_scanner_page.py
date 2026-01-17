@@ -68,7 +68,11 @@ class TestScannerPageCreation:
 
         with mock.patch("src.core.utils.check_clamd_connection", return_value=(True, "Connected")):
             ScannerPage.create_page(
-                mock_config_path, widgets_dict, mock_settings_manager, True, mock_parent_window
+                mock_config_path,
+                widgets_dict,
+                mock_settings_manager,
+                True,
+                mock_parent_window,
             )
 
             # Should create a PreferencesPage
@@ -89,7 +93,11 @@ class TestScannerPageCreation:
 
         with mock.patch("src.core.utils.check_clamd_connection", return_value=(True, "Connected")):
             ScannerPage.create_page(
-                mock_config_path, widgets_dict, mock_settings_manager, True, mock_parent_window
+                mock_config_path,
+                widgets_dict,
+                mock_settings_manager,
+                True,
+                mock_parent_window,
             )
 
             # Should set title and icon_name
@@ -113,7 +121,8 @@ class TestScannerPageCreation:
             "src.ui.preferences.scanner_page._ScannerPageHelper._create_file_location_group"
         ) as mock_create_file_location:
             with mock.patch(
-                "src.core.utils.check_clamd_connection", return_value=(True, "Connected")
+                "src.core.utils.check_clamd_connection",
+                return_value=(True, "Connected"),
             ):
                 ScannerPage.create_page(
                     mock_config_path,
@@ -139,7 +148,11 @@ class TestScannerPageCreation:
 
         with mock.patch("src.core.utils.check_clamd_connection", return_value=(True, "Connected")):
             ScannerPage.create_page(
-                mock_config_path, widgets_dict, mock_settings_manager, True, mock_parent_window
+                mock_config_path,
+                widgets_dict,
+                mock_settings_manager,
+                True,
+                mock_parent_window,
             )
 
         # Check that all expected widgets are in the dict
@@ -181,7 +194,11 @@ class TestScannerPageCreation:
 
         with mock.patch("src.core.utils.check_clamd_connection", return_value=(True, "Connected")):
             ScannerPage.create_page(
-                mock_config_path, widgets_dict, mock_settings_manager, False, mock_parent_window
+                mock_config_path,
+                widgets_dict,
+                mock_settings_manager,
+                False,
+                mock_parent_window,
             )
 
         # Should create backend_row and daemon_status_row
@@ -212,7 +229,11 @@ class TestScannerPageCreation:
 
         with mock.patch("src.core.utils.check_clamd_connection", return_value=(True, "Connected")):
             ScannerPage.create_page(
-                mock_config_path, widgets_dict, mock_settings_manager, True, mock_parent_window
+                mock_config_path,
+                widgets_dict,
+                mock_settings_manager,
+                True,
+                mock_parent_window,
             )
 
         # Should create ComboRow
@@ -232,7 +253,11 @@ class TestScannerPageCreation:
 
         with mock.patch("src.core.utils.check_clamd_connection", return_value=(True, "Connected")):
             ScannerPage.create_page(
-                mock_config_path, widgets_dict, mock_settings_manager, True, mock_parent_window
+                mock_config_path,
+                widgets_dict,
+                mock_settings_manager,
+                True,
+                mock_parent_window,
             )
 
         # Should create SwitchRows for file types and logging
@@ -253,7 +278,11 @@ class TestScannerPageCreation:
 
         with mock.patch("src.core.utils.check_clamd_connection", return_value=(True, "Connected")):
             ScannerPage.create_page(
-                mock_config_path, widgets_dict, mock_settings_manager, True, mock_parent_window
+                mock_config_path,
+                widgets_dict,
+                mock_settings_manager,
+                True,
+                mock_parent_window,
             )
 
         # Should create SpinRows for 4 performance settings
@@ -273,7 +302,11 @@ class TestScannerPageCreation:
 
         with mock.patch("src.core.utils.check_clamd_connection", return_value=(True, "Connected")):
             ScannerPage.create_page(
-                mock_config_path, widgets_dict, mock_settings_manager, True, mock_parent_window
+                mock_config_path,
+                widgets_dict,
+                mock_settings_manager,
+                True,
+                mock_parent_window,
             )
 
         # Should create at least one EntryRow for LogFile
@@ -294,7 +327,11 @@ class TestScannerPageCreation:
             mock_check_clamd.return_value = (True, "Connected")
 
             ScannerPage.create_page(
-                mock_config_path, widgets_dict, mock_settings_manager, True, mock_parent_window
+                mock_config_path,
+                widgets_dict,
+                mock_settings_manager,
+                True,
+                mock_parent_window,
             )
 
             # Should check daemon connection
@@ -325,7 +362,11 @@ class TestScannerPageBackendSelection:
         widgets_dict = {}
         with mock.patch("src.core.utils.check_clamd_connection", return_value=(True, "Connected")):
             ScannerPage.create_page(
-                "/etc/clamav/clamd.conf", widgets_dict, mock_settings_manager, True, None
+                "/etc/clamav/clamd.conf",
+                widgets_dict,
+                mock_settings_manager,
+                True,
+                None,
             )
 
         # Should set to index 0 for "auto" - use widgets_dict since ComboRow uses side_effect
@@ -342,7 +383,11 @@ class TestScannerPageBackendSelection:
         widgets_dict = {}
         with mock.patch("src.core.utils.check_clamd_connection", return_value=(True, "Connected")):
             ScannerPage.create_page(
-                "/etc/clamav/clamd.conf", widgets_dict, mock_settings_manager, True, None
+                "/etc/clamav/clamd.conf",
+                widgets_dict,
+                mock_settings_manager,
+                True,
+                None,
             )
 
         # Should set to index 1 for "daemon" - use widgets_dict since ComboRow uses side_effect
@@ -359,7 +404,11 @@ class TestScannerPageBackendSelection:
         widgets_dict = {}
         with mock.patch("src.core.utils.check_clamd_connection", return_value=(True, "Connected")):
             ScannerPage.create_page(
-                "/etc/clamav/clamd.conf", widgets_dict, mock_settings_manager, True, None
+                "/etc/clamav/clamd.conf",
+                widgets_dict,
+                mock_settings_manager,
+                True,
+                None,
             )
 
         # Should set to index 2 for "clamscan" - use widgets_dict since ComboRow uses side_effect
@@ -715,7 +764,7 @@ class TestScannerPagePopulateFields:
         mock_widgets["LogSyslog"].set_active.assert_called_with(True)
 
     def test_populate_fields_skips_missing_keys(self, mock_gi_modules, mock_config, mock_widgets):
-        """Test populate_fields skips keys not in config."""
+        """Test populate_fields handles missing keys with defaults."""
         from src.ui.preferences.scanner_page import ScannerPage
 
         # Simulate missing keys
@@ -723,8 +772,10 @@ class TestScannerPagePopulateFields:
 
         ScannerPage.populate_fields(mock_config, mock_widgets)
 
-        # Should not call set_active/set_value for missing keys
-        mock_widgets["ScanPE"].set_active.assert_not_called()
+        # Should call set_active with default value (False) for missing boolean keys
+        # This is the new behavior - populate_bool_field now sets default values
+        mock_widgets["ScanPE"].set_active.assert_called_with(False)
+        # set_value should not be called for missing numeric keys (different helper)
         mock_widgets["MaxFileSize"].set_value.assert_not_called()
 
 

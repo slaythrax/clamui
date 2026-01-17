@@ -306,3 +306,103 @@ class TestPreferencesPageMixinInheritance:
         assert callable(instance._show_error_dialog)
         assert callable(instance._show_success_dialog)
         assert callable(instance._create_file_location_group)
+
+
+class TestPopulateBoolField:
+    """Tests for the populate_bool_field helper function."""
+
+    def test_populate_bool_field_with_existing_key_yes(self, mock_gi_modules):
+        """Test populate_bool_field sets widget active when config has 'yes'."""
+        from src.ui.preferences.base import populate_bool_field
+
+        # Create a mock config with LogVerbose = "yes"
+        mock_config = mock.MagicMock()
+        mock_config.has_key.return_value = True
+        mock_config.get_value.return_value = "yes"
+
+        # Create mock widget
+        mock_widget = mock.MagicMock()
+        widgets_dict = {"LogVerbose": mock_widget}
+
+        # Populate the field
+        populate_bool_field(mock_config, widgets_dict, "LogVerbose")
+
+        # Verify widget was set to active (True)
+        mock_config.has_key.assert_called_once_with("LogVerbose")
+        mock_config.get_value.assert_called_once_with("LogVerbose")
+        mock_widget.set_active.assert_called_once_with(True)
+
+    def test_populate_bool_field_with_existing_key_no(self, mock_gi_modules):
+        """Test populate_bool_field sets widget inactive when config has 'no'."""
+        from src.ui.preferences.base import populate_bool_field
+
+        # Create a mock config with LogVerbose = "no"
+        mock_config = mock.MagicMock()
+        mock_config.has_key.return_value = True
+        mock_config.get_value.return_value = "no"
+
+        # Create mock widget
+        mock_widget = mock.MagicMock()
+        widgets_dict = {"LogVerbose": mock_widget}
+
+        # Populate the field
+        populate_bool_field(mock_config, widgets_dict, "LogVerbose")
+
+        # Verify widget was set to inactive (False)
+        mock_widget.set_active.assert_called_once_with(False)
+
+    def test_populate_bool_field_with_missing_key_default_false(self, mock_gi_modules):
+        """Test populate_bool_field uses default=False when key is missing."""
+        from src.ui.preferences.base import populate_bool_field
+
+        # Create a mock config that doesn't have LogVerbose
+        mock_config = mock.MagicMock()
+        mock_config.has_key.return_value = False
+
+        # Create mock widget
+        mock_widget = mock.MagicMock()
+        widgets_dict = {"LogVerbose": mock_widget}
+
+        # Populate the field with default=False
+        populate_bool_field(mock_config, widgets_dict, "LogVerbose", default=False)
+
+        # Verify widget was set to False (default)
+        mock_config.has_key.assert_called_once_with("LogVerbose")
+        # get_value should NOT be called since key doesn't exist
+        mock_config.get_value.assert_not_called()
+        mock_widget.set_active.assert_called_once_with(False)
+
+    def test_populate_bool_field_with_missing_key_default_true(self, mock_gi_modules):
+        """Test populate_bool_field uses default=True when key is missing."""
+        from src.ui.preferences.base import populate_bool_field
+
+        # Create a mock config that doesn't have LogVerbose
+        mock_config = mock.MagicMock()
+        mock_config.has_key.return_value = False
+
+        # Create mock widget
+        mock_widget = mock.MagicMock()
+        widgets_dict = {"LogVerbose": mock_widget}
+
+        # Populate the field with default=True
+        populate_bool_field(mock_config, widgets_dict, "LogVerbose", default=True)
+
+        # Verify widget was set to True (default)
+        mock_widget.set_active.assert_called_once_with(True)
+
+    def test_populate_bool_field_case_insensitive(self, mock_gi_modules):
+        """Test populate_bool_field handles 'YES' and 'Yes' correctly."""
+        from src.ui.preferences.base import populate_bool_field
+
+        # Test with uppercase 'YES'
+        mock_config = mock.MagicMock()
+        mock_config.has_key.return_value = True
+        mock_config.get_value.return_value = "YES"
+
+        mock_widget = mock.MagicMock()
+        widgets_dict = {"LogVerbose": mock_widget}
+
+        populate_bool_field(mock_config, widgets_dict, "LogVerbose")
+
+        # Should convert to lowercase and set active
+        mock_widget.set_active.assert_called_once_with(True)

@@ -11,6 +11,7 @@ from src.core.clamav_config import (
     ClamAVConfig,
     ClamAVConfigValue,
     parse_config,
+    write_config_with_elevation,
 )
 
 
@@ -82,6 +83,105 @@ class TestClamAVConfig:
 
         assert config.get_value("LogVerbose") == "yes"
         assert len(config.values["LogVerbose"]) == 1
+
+    def test_set_value_preserves_line_number_for_existing_key(self):
+        """Test that set_value preserves line numbers when updating existing keys."""
+        config = ClamAVConfig(file_path=Path("/test"))
+
+        # Simulate parsed config with LogVerbose at line 42
+        config.values["LogVerbose"] = [ClamAVConfigValue(value="no", line_number=42)]
+
+        # Update the value (line_number not specified → should preserve)
+        config.set_value("LogVerbose", "yes")
+
+        # Verify line number was preserved
+        assert config.values["LogVerbose"][0].line_number == 42
+        assert config.values["LogVerbose"][0].value == "yes"
+
+    def test_set_value_new_key_has_line_number_zero(self):
+        """Test that set_value uses line_number=0 for new keys."""
+        config = ClamAVConfig(file_path=Path("/test"))
+
+        # Add a new key
+        config.set_value("NewOption", "value")
+
+        # Verify line number is 0 (will be appended)
+        assert config.values["NewOption"][0].line_number == 0
+        assert config.values["NewOption"][0].value == "value"
+
+    def test_set_value_explicit_line_number_overrides(self):
+        """Test that explicit line_number parameter overrides preservation."""
+        config = ClamAVConfig(file_path=Path("/test"))
+
+        # Simulate parsed config with LogVerbose at line 42
+        config.values["LogVerbose"] = [ClamAVConfigValue(value="no", line_number=42)]
+
+        # Update with explicit line_number (should use provided value, not preserve)
+        config.set_value("LogVerbose", "yes", line_number=99)
+
+        # Verify explicit line number was used
+        assert config.values["LogVerbose"][0].line_number == 99
+
+    def test_to_string_replaces_line_when_line_number_preserved(self):
+        """Test that to_string() replaces lines when line_number is preserved."""
+        config = ClamAVConfig(file_path=Path("/test"))
+
+        # Simulate raw_lines from parsing
+        config.raw_lines = [
+            "# Comment",
+            "DatabaseDirectory /var/lib/clamav",
+            "LogVerbose no",  # ← Line 3 (index 2)
+            "Checks 12",
+        ]
+
+        # Simulate parsed values with line numbers
+        config.values = {
+            "DatabaseDirectory": [ClamAVConfigValue(value="/var/lib/clamav", line_number=2)],
+            "LogVerbose": [ClamAVConfigValue(value="no", line_number=3)],
+            "Checks": [ClamAVConfigValue(value="12", line_number=4)],
+        }
+
+        # Update LogVerbose (set_value should preserve line 3)
+        config.set_value("LogVerbose", "yes")
+
+        # Convert to string
+        output = config.to_string()
+
+        # Verify LogVerbose appears only once, as "yes", at original position
+        lines = output.split("\n")
+        assert "LogVerbose yes" in lines
+        assert "LogVerbose no" not in lines
+        # Line is at index 2 (third line, since indexing starts at 0)
+        assert lines[2] == "LogVerbose yes"
+
+    def test_to_string_no_duplicates_when_line_number_preserved(self):
+        """Test that to_string() doesn't create duplicate entries."""
+        config = ClamAVConfig(file_path=Path("/test"))
+
+        # Simulate config with raw_lines
+        config.raw_lines = [
+            "DatabaseDirectory /var/lib/clamav",
+            "LogVerbose no",
+            "Checks 12",
+        ]
+
+        config.values = {
+            "DatabaseDirectory": [ClamAVConfigValue(value="/var/lib/clamav", line_number=1)],
+            "LogVerbose": [ClamAVConfigValue(value="no", line_number=2)],
+            "Checks": [ClamAVConfigValue(value="12", line_number=3)],
+        }
+
+        # Update LogVerbose multiple times
+        config.set_value("LogVerbose", "yes")
+        config.set_value("LogVerbose", "no")
+        config.set_value("LogVerbose", "yes")
+
+        output = config.to_string()
+
+        # Verify only one LogVerbose entry exists
+        log_verbose_count = output.count("LogVerbose")
+        assert log_verbose_count == 1
+        assert "LogVerbose yes" in output
 
     def test_add_value(self):
         """Test add_value appends to existing values."""
@@ -599,3 +699,73 @@ class TestClamAVConfigToString:
 
         assert "LogVerbose no" in result
         assert "# Changed to no" in result
+
+
+class TestWriteConfigWithElevation:
+    """Tests for write_config_with_elevation function."""
+
+    def test_write_to_user_writable_directory(self, tmp_path):
+        """Test writing to user-writable directory without elevation."""
+        # Create a config for a user-writable path
+        config_file = tmp_path / "test.conf"
+        config = ClamAVConfig(file_path=config_file)
+        config.set_value("DatabaseDirectory", "/var/lib/clamav")
+
+        # Should succeed without needing pkexec
+        success, error = write_config_with_elevation(config)
+
+        assert success is True
+        assert error is None
+        assert config_file.exists()
+        assert "DatabaseDirectory /var/lib/clamav" in config_file.read_text()
+
+    def test_write_creates_parent_directory(self, tmp_path):
+        """Test writing creates parent directory if it doesn't exist."""
+        # Config in a non-existent subdirectory
+        config_file = tmp_path / "subdir" / "test.conf"
+        config = ClamAVConfig(file_path=config_file)
+        config.set_value("LogVerbose", "yes")
+
+        success, error = write_config_with_elevation(config)
+
+        assert success is True
+        assert error is None
+        assert config_file.exists()
+        assert config_file.parent.exists()
+
+    def test_write_without_file_path(self):
+        """Test writing config without file path specified."""
+        config = ClamAVConfig(file_path=None)
+        config.set_value("LogVerbose", "yes")
+
+        success, error = write_config_with_elevation(config)
+
+        assert success is False
+        assert "No file path specified" in error
+
+    def test_write_sets_permissions(self, tmp_path):
+        """Test writing sets correct file permissions."""
+        config_file = tmp_path / "test.conf"
+        config = ClamAVConfig(file_path=config_file)
+        config.set_value("LogVerbose", "yes")
+
+        success, error = write_config_with_elevation(config)
+
+        assert success is True
+        # Check file has 0o644 permissions (rw-r--r--)
+        assert (config_file.stat().st_mode & 0o777) == 0o644
+
+    def test_write_preserves_config_content(self, tmp_path):
+        """Test writing preserves all config content."""
+        config_file = tmp_path / "test.conf"
+        config = ClamAVConfig(file_path=config_file)
+        config.raw_lines = ["# Comment line\n", "LogVerbose yes\n"]
+        config.set_value("DatabaseDirectory", "/var/lib/clamav")
+
+        success, error = write_config_with_elevation(config)
+
+        assert success is True
+        content = config_file.read_text()
+        assert "# Comment line" in content
+        assert "LogVerbose yes" in content
+        assert "DatabaseDirectory /var/lib/clamav" in content

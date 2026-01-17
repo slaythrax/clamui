@@ -259,10 +259,12 @@ class TestSavePageSaveClicked:
                 "src.ui.preferences.save_page.ScannerPage.collect_data", return_value={}
             ):
                 with mock.patch(
-                    "src.ui.preferences.save_page.OnAccessPage.collect_data", return_value={}
+                    "src.ui.preferences.save_page.OnAccessPage.collect_data",
+                    return_value={},
                 ):
                     with mock.patch(
-                        "src.ui.preferences.save_page.ScheduledPage.collect_data", return_value={}
+                        "src.ui.preferences.save_page.ScheduledPage.collect_data",
+                        return_value={},
                     ):
                         with mock.patch(
                             "src.ui.preferences.save_page.validate_config",
@@ -283,10 +285,12 @@ class TestSavePageSaveClicked:
                 "src.ui.preferences.save_page.ScannerPage.collect_data", return_value={}
             ):
                 with mock.patch(
-                    "src.ui.preferences.save_page.OnAccessPage.collect_data", return_value={}
+                    "src.ui.preferences.save_page.OnAccessPage.collect_data",
+                    return_value={},
                 ):
                     with mock.patch(
-                        "src.ui.preferences.save_page.ScheduledPage.collect_data", return_value={}
+                        "src.ui.preferences.save_page.ScheduledPage.collect_data",
+                        return_value={},
                     ):
                         with mock.patch(
                             "src.ui.preferences.save_page.validate_config",
@@ -319,10 +323,12 @@ class TestSavePageSaveClicked:
                 "src.ui.preferences.save_page.ScannerPage.collect_data", return_value={}
             ) as mock_scanner:
                 with mock.patch(
-                    "src.ui.preferences.save_page.OnAccessPage.collect_data", return_value={}
+                    "src.ui.preferences.save_page.OnAccessPage.collect_data",
+                    return_value={},
                 ) as mock_onaccess:
                     with mock.patch(
-                        "src.ui.preferences.save_page.ScheduledPage.collect_data", return_value={}
+                        "src.ui.preferences.save_page.ScheduledPage.collect_data",
+                        return_value={},
                     ) as mock_scheduled:
                         with mock.patch(
                             "src.ui.preferences.save_page.validate_config",
@@ -349,10 +355,12 @@ class TestSavePageSaveClicked:
                 "src.ui.preferences.save_page.ScannerPage.collect_data", return_value={}
             ):
                 with mock.patch(
-                    "src.ui.preferences.save_page.OnAccessPage.collect_data", return_value={}
+                    "src.ui.preferences.save_page.OnAccessPage.collect_data",
+                    return_value={},
                 ):
                     with mock.patch(
-                        "src.ui.preferences.save_page.ScheduledPage.collect_data", return_value={}
+                        "src.ui.preferences.save_page.ScheduledPage.collect_data",
+                        return_value={},
                     ):
                         with mock.patch(
                             "src.ui.preferences.save_page.validate_config",
@@ -374,10 +382,12 @@ class TestSavePageSaveClicked:
                 return_value={"MaxFileSize": "100M"},
             ):
                 with mock.patch(
-                    "src.ui.preferences.save_page.OnAccessPage.collect_data", return_value={}
+                    "src.ui.preferences.save_page.OnAccessPage.collect_data",
+                    return_value={},
                 ):
                     with mock.patch(
-                        "src.ui.preferences.save_page.ScheduledPage.collect_data", return_value={}
+                        "src.ui.preferences.save_page.ScheduledPage.collect_data",
+                        return_value={},
                     ):
                         with mock.patch(
                             "src.ui.preferences.save_page.validate_config",
@@ -401,10 +411,12 @@ class TestSavePageSaveClicked:
                 "src.ui.preferences.save_page.ScannerPage.collect_data", return_value={}
             ):
                 with mock.patch(
-                    "src.ui.preferences.save_page.OnAccessPage.collect_data", return_value={}
+                    "src.ui.preferences.save_page.OnAccessPage.collect_data",
+                    return_value={},
                 ):
                     with mock.patch(
-                        "src.ui.preferences.save_page.ScheduledPage.collect_data", return_value={}
+                        "src.ui.preferences.save_page.ScheduledPage.collect_data",
+                        return_value={},
                     ):
                         with mock.patch(
                             "src.ui.preferences.save_page.validate_config",
@@ -428,10 +440,12 @@ class TestSavePageSaveClicked:
                 "src.ui.preferences.save_page.ScannerPage.collect_data", return_value={}
             ):
                 with mock.patch(
-                    "src.ui.preferences.save_page.OnAccessPage.collect_data", return_value={}
+                    "src.ui.preferences.save_page.OnAccessPage.collect_data",
+                    return_value={},
                 ):
                     with mock.patch(
-                        "src.ui.preferences.save_page.ScheduledPage.collect_data", return_value={}
+                        "src.ui.preferences.save_page.ScheduledPage.collect_data",
+                        return_value={},
                     ):
                         with mock.patch(
                             "src.ui.preferences.save_page.validate_config",
@@ -458,10 +472,12 @@ class TestSavePageSaveClicked:
                 "src.ui.preferences.save_page.ScannerPage.collect_data", return_value={}
             ):
                 with mock.patch(
-                    "src.ui.preferences.save_page.OnAccessPage.collect_data", return_value={}
+                    "src.ui.preferences.save_page.OnAccessPage.collect_data",
+                    return_value={},
                 ):
                     with mock.patch(
-                        "src.ui.preferences.save_page.ScheduledPage.collect_data", return_value={}
+                        "src.ui.preferences.save_page.ScheduledPage.collect_data",
+                        return_value={},
                     ):
                         with mock.patch(
                             "src.ui.preferences.save_page.validate_config",
@@ -482,10 +498,12 @@ class TestSavePageSaveClicked:
                 "src.ui.preferences.save_page.ScannerPage.collect_data", return_value={}
             ):
                 with mock.patch(
-                    "src.ui.preferences.save_page.OnAccessPage.collect_data", return_value={}
+                    "src.ui.preferences.save_page.OnAccessPage.collect_data",
+                    return_value={},
                 ):
                     with mock.patch(
-                        "src.ui.preferences.save_page.ScheduledPage.collect_data", return_value={}
+                        "src.ui.preferences.save_page.ScheduledPage.collect_data",
+                        return_value={},
                     ):
                         with mock.patch(
                             "src.ui.preferences.save_page.validate_config",
@@ -508,10 +526,12 @@ class TestSavePageSaveClicked:
                 "src.ui.preferences.save_page.ScannerPage.collect_data", return_value={}
             ):
                 with mock.patch(
-                    "src.ui.preferences.save_page.OnAccessPage.collect_data", return_value={}
+                    "src.ui.preferences.save_page.OnAccessPage.collect_data",
+                    return_value={},
                 ):
                     with mock.patch(
-                        "src.ui.preferences.save_page.ScheduledPage.collect_data", return_value={}
+                        "src.ui.preferences.save_page.ScheduledPage.collect_data",
+                        return_value={},
                     ):
                         with mock.patch(
                             "src.ui.preferences.save_page.validate_config",
@@ -537,10 +557,12 @@ class TestSavePageSaveClicked:
                 "src.ui.preferences.save_page.ScannerPage.collect_data", return_value={}
             ):
                 with mock.patch(
-                    "src.ui.preferences.save_page.OnAccessPage.collect_data", return_value={}
+                    "src.ui.preferences.save_page.OnAccessPage.collect_data",
+                    return_value={},
                 ):
                     with mock.patch(
-                        "src.ui.preferences.save_page.ScheduledPage.collect_data", return_value={}
+                        "src.ui.preferences.save_page.ScheduledPage.collect_data",
+                        return_value={},
                     ):
                         with mock.patch(
                             "src.ui.preferences.save_page.validate_config",
@@ -654,8 +676,8 @@ class TestSavePageSaveConfigsThread:
                 with mock.patch("src.ui.preferences.save_page.GLib"):
                     save_page._save_configs_thread(freshclam_updates, {}, {}, {}, mock_button)
 
-                    # Should set values on freshclam config
-                    save_page._freshclam_config.set_value.assert_called_with(
+                    # Should set values on window's freshclam config
+                    save_page._window._freshclam_config.set_value.assert_called_with(
                         "DatabaseDirectory", "/var/lib/clamav"
                     )
 
@@ -675,8 +697,10 @@ class TestSavePageSaveConfigsThread:
                 with mock.patch("src.ui.preferences.save_page.GLib"):
                     save_page._save_configs_thread({}, clamd_updates, {}, {}, mock_button)
 
-                    # Should set values on clamd config
-                    save_page._clamd_config.set_value.assert_called_with("MaxFileSize", "100M")
+                    # Should set values on window's clamd config
+                    save_page._window._clamd_config.set_value.assert_called_with(
+                        "MaxFileSize", "100M"
+                    )
 
                     # Should write clamd config
                     mock_write.assert_called()
@@ -694,8 +718,8 @@ class TestSavePageSaveConfigsThread:
                 with mock.patch("src.ui.preferences.save_page.GLib"):
                     save_page._save_configs_thread({}, {}, onaccess_updates, {}, mock_button)
 
-                    # Should set values on clamd config
-                    save_page._clamd_config.set_value.assert_called_with(
+                    # Should set values on window's clamd config
+                    save_page._window._clamd_config.set_value.assert_called_with(
                         "OnAccessIncludePath", ["/home"]
                     )
 
@@ -715,9 +739,9 @@ class TestSavePageSaveConfigsThread:
                         {}, clamd_updates, onaccess_updates, {}, mock_button
                     )
 
-                    # Should set both sets of values on clamd config
-                    save_page._clamd_config.set_value.assert_any_call("MaxFileSize", "100M")
-                    save_page._clamd_config.set_value.assert_any_call(
+                    # Should set both sets of values on window's clamd config
+                    save_page._window._clamd_config.set_value.assert_any_call("MaxFileSize", "100M")
+                    save_page._window._clamd_config.set_value.assert_any_call(
                         "OnAccessIncludePath", ["/home"]
                     )
 
@@ -987,3 +1011,160 @@ class TestSavePageSaveConfigsThread:
                     # Should store error message
                     assert save_page._scheduler_error is not None
                     assert "Write failed" in save_page._scheduler_error
+
+
+class TestSavePageWindowConfigAccess:
+    """Tests for SavePage accessing config from window instead of storing its own copy."""
+
+    def test_save_page_accesses_window_freshclam_config(self, mock_gi_modules):
+        """SavePage should access window's freshclam_config, not store its own copy."""
+        from src.ui.preferences.save_page import SavePage
+
+        # Create mock window with configs (simulating _load_configs() populating them)
+        mock_window = mock.MagicMock()
+        mock_window._freshclam_config = mock.MagicMock()
+        mock_window._clamd_config = None
+
+        # Create SavePage with None configs (simulating the initialization order bug)
+        save_page = SavePage(
+            window=mock_window,
+            freshclam_config=None,  # Bug: passing None at init time
+            clamd_config=None,
+            freshclam_conf_path="/etc/clamav/freshclam.conf",
+            clamd_conf_path="/etc/clamav/clamd.conf",
+            clamd_available=False,
+            settings_manager=mock.MagicMock(),
+            scheduler=mock.MagicMock(),
+            freshclam_widgets={},
+            clamd_widgets={},
+            onaccess_widgets={},
+            scheduled_widgets={},
+        )
+
+        # Verify SavePage can access window's config (not its own None copy)
+        # This should NOT raise AttributeError
+        assert save_page._window._freshclam_config is not None
+        assert save_page._window._freshclam_config == mock_window._freshclam_config
+
+    def test_save_page_accesses_window_clamd_config(self, mock_gi_modules):
+        """SavePage should access window's clamd_config, not store its own copy."""
+        from src.ui.preferences.save_page import SavePage
+
+        # Create mock window with configs
+        mock_window = mock.MagicMock()
+        mock_window._freshclam_config = None
+        mock_window._clamd_config = mock.MagicMock()
+
+        # Create SavePage with None configs
+        save_page = SavePage(
+            window=mock_window,
+            freshclam_config=None,
+            clamd_config=None,
+            freshclam_conf_path="/etc/clamav/freshclam.conf",
+            clamd_conf_path="/etc/clamav/clamd.conf",
+            clamd_available=True,
+            settings_manager=mock.MagicMock(),
+            scheduler=mock.MagicMock(),
+            freshclam_widgets={},
+            clamd_widgets={},
+            onaccess_widgets={},
+            scheduled_widgets={},
+        )
+
+        # Verify SavePage can access window's config
+        assert save_page._window._clamd_config is not None
+        assert save_page._window._clamd_config == mock_window._clamd_config
+
+    def test_save_page_validation_uses_window_config(self, mock_gi_modules):
+        """SavePage validation should check window's config, not stored copy."""
+        from src.ui.preferences.save_page import SavePage
+
+        # Create mock window with valid config
+        mock_window = mock.MagicMock()
+        mock_freshclam_config = mock.MagicMock()
+        mock_window._freshclam_config = mock_freshclam_config
+
+        # Create SavePage with None config (simulating bug)
+        save_page = SavePage(
+            window=mock_window,
+            freshclam_config=None,  # Bug: None at init
+            clamd_config=None,
+            freshclam_conf_path="/etc/clamav/freshclam.conf",
+            clamd_conf_path="/etc/clamav/clamd.conf",
+            clamd_available=False,
+            settings_manager=mock.MagicMock(),
+            scheduler=mock.MagicMock(),
+            freshclam_widgets={},
+            clamd_widgets={},
+            onaccess_widgets={},
+            scheduled_widgets={},
+        )
+
+        mock_button = mock.MagicMock()
+
+        # Simulate save with freshclam updates
+        with mock.patch(
+            "src.ui.preferences.save_page.DatabasePage.collect_data",
+            return_value={"DatabaseDirectory": "/var/lib/clamav"},
+        ):
+            with mock.patch(
+                "src.ui.preferences.save_page.ScannerPage.collect_data", return_value={}
+            ):
+                with mock.patch(
+                    "src.ui.preferences.save_page.OnAccessPage.collect_data",
+                    return_value={},
+                ):
+                    with mock.patch(
+                        "src.ui.preferences.save_page.ScheduledPage.collect_data",
+                        return_value={},
+                    ):
+                        with mock.patch(
+                            "src.ui.preferences.save_page.validate_config",
+                            return_value=(True, None),
+                        ) as mock_validate:
+                            with mock.patch("src.ui.preferences.save_page.threading.Thread"):
+                                save_page._on_save_clicked(mock_button)
+
+                                # Validation should use window's config (not None)
+                                mock_validate.assert_called_with(mock_window._freshclam_config)
+
+    def test_save_page_save_thread_uses_window_config(self, mock_gi_modules):
+        """SavePage save thread should use window's config for set_value calls."""
+        from src.ui.preferences.save_page import SavePage
+
+        # Create mock window with configs
+        mock_window = mock.MagicMock()
+        mock_freshclam_config = mock.MagicMock()
+        mock_window._freshclam_config = mock_freshclam_config
+
+        # Create SavePage with None config
+        save_page = SavePage(
+            window=mock_window,
+            freshclam_config=None,
+            clamd_config=None,
+            freshclam_conf_path="/etc/clamav/freshclam.conf",
+            clamd_conf_path="/etc/clamav/clamd.conf",
+            clamd_available=False,
+            settings_manager=mock.MagicMock(),
+            scheduler=mock.MagicMock(),
+            freshclam_widgets={},
+            clamd_widgets={},
+            onaccess_widgets={},
+            scheduled_widgets={},
+        )
+
+        mock_button = mock.MagicMock()
+        freshclam_updates = {"DatabaseDirectory": "/var/lib/clamav"}
+
+        with mock.patch("src.ui.preferences.save_page.backup_config"):
+            with mock.patch(
+                "src.ui.preferences.save_page.write_config_with_elevation",
+                return_value=(True, None),
+            ):
+                with mock.patch("src.ui.preferences.save_page.GLib"):
+                    save_page._save_configs_thread(freshclam_updates, {}, {}, {}, mock_button)
+
+                    # Should call set_value on window's config (not None)
+                    mock_window._freshclam_config.set_value.assert_called_with(
+                        "DatabaseDirectory", "/var/lib/clamav"
+                    )

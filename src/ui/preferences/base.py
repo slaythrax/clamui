@@ -17,7 +17,9 @@ gi.require_version("Adw", "1")
 from gi.repository import Adw, Gtk
 
 
-def populate_bool_field(config, widgets_dict: dict, key: str) -> None:
+def populate_bool_field(
+    config, widgets_dict: dict, key: str, default: bool = False
+) -> None:
     """
     Populate a boolean switch widget from config.
 
@@ -25,9 +27,15 @@ def populate_bool_field(config, widgets_dict: dict, key: str) -> None:
         config: Parsed config object with has_key() and get_value() methods
         widgets_dict: Dictionary containing widget references
         key: Config key name (widget key must match)
+        default: Default value if key is missing (False = "no", True = "yes")
     """
     if config.has_key(key):
-        widgets_dict[key].set_active(config.get_value(key).lower() == "yes")
+        value = config.get_value(key)
+        is_yes = value.lower() == "yes" if value else False
+        widgets_dict[key].set_active(is_yes)
+    else:
+        # Key missing - use default value
+        widgets_dict[key].set_active(default)
 
 
 def populate_int_field(config, widgets_dict: dict, key: str) -> None:
@@ -59,7 +67,9 @@ def populate_text_field(config, widgets_dict: dict, key: str) -> None:
         widgets_dict[key].set_text(config.get_value(key))
 
 
-def populate_multivalue_field(config, widgets_dict: dict, key: str, separator: str = ", ") -> None:
+def populate_multivalue_field(
+    config, widgets_dict: dict, key: str, separator: str = ", "
+) -> None:
     """
     Populate a text entry widget with comma-separated values from config.
 
@@ -134,7 +144,9 @@ class PreferencesPageMixin:
         try:
             # Use xdg-open on Linux to open folder in default file manager
             subprocess.Popen(
-                ["xdg-open", folder_path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+                ["xdg-open", folder_path],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
             )
         except Exception as e:
             # Show error dialog if opening fails
