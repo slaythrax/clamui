@@ -96,6 +96,16 @@
   </keywords>
 
   <releases>
+    <release version="0.1.1b" date="2026-01-17">
+      <description>
+        <p>Bug fix release</p>
+        <ul>
+          <li>Fixed bugs related to Ubuntu Desktop Xorg and Wayland not being able to maximize</li>
+          <li>Fixed bugs related to ClamAV configuration file permissions</li>
+          <li>Added back the Tray Icon</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.1.1" date="2026-01-13">
       <description>
         <p>Bug fix release</p>
