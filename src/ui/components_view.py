@@ -98,6 +98,7 @@ class ComponentsView(Gtk.Box):
         self._component_rows = {}
         self._status_icons = {}
         self._status_labels = {}
+        self._guide_rows = {}
 
         # Set up the UI
         self._setup_ui()
@@ -146,7 +147,14 @@ class ComponentsView(Gtk.Box):
 
         components_group = Adw.PreferencesGroup()
         components_group.set_title("Components Status")
-        components_group.set_description("Expand each component for installation instructions")
+        # Set description based on whether running in Flatpak
+        if is_flatpak():
+            components_group.set_description(
+                "clamscan and freshclam are bundled with the Flatpak package. "
+                "Daemon components are not available in Flatpak."
+            )
+        else:
+            components_group.set_description("Expand each component for installation instructions")
         self._components_group = components_group
 
         # Add refresh button to the header
@@ -157,14 +165,20 @@ class ComponentsView(Gtk.Box):
             components_group, "clamscan", "Virus Scanner", "security-high-symbolic"
         )
         self._create_component_row(
-            components_group, "freshclam", "Database Updater", "software-update-available-symbolic"
+            components_group,
+            "freshclam",
+            "Database Updater",
+            "software-update-available-symbolic",
         )
 
         # Only show daemon-related components for native installations
         # In Flatpak, the daemon cannot be accessed from inside the sandbox
         if not is_flatpak():
             self._create_component_row(
-                components_group, "clamdscan", "Daemon Scanner Client", "network-server-symbolic"
+                components_group,
+                "clamdscan",
+                "Daemon Scanner Client",
+                "network-server-symbolic",
             )
             self._create_component_row(
                 components_group, "clamd", "Scanner Daemon", "system-run-symbolic"
@@ -233,26 +247,32 @@ class ComponentsView(Gtk.Box):
         content_box.set_margin_start(12)
         content_box.set_margin_end(12)
 
-        # Add installation commands for each distro
-        commands = guide.get("commands", [])
-        for distro, command in commands:
-            command_row = self._create_command_row(distro, command)
-            content_box.append(command_row)
+        # In Flatpak, clamscan and freshclam are bundled - show a message instead
+        is_flatpak_bundled = is_flatpak() and component_id in ("clamscan", "freshclam")
 
-        # Add notes if present
-        notes = guide.get("notes", "")
-        if notes:
-            notes_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
-            notes_box.set_margin_top(6)
+        if is_flatpak_bundled:
+            self._add_flatpak_bundled_message(content_box, component_id)
+        else:
+            # Add installation commands for each distro
+            commands = guide.get("commands", [])
+            for distro, command in commands:
+                command_row = self._create_command_row(distro, command)
+                content_box.append(command_row)
 
-            notes_label = Gtk.Label()
-            notes_label.set_markup(f"<small><i>{GLib.markup_escape_text(notes)}</i></small>")
-            notes_label.set_wrap(True)
-            notes_label.set_xalign(0)
-            notes_label.add_css_class("dim-label")
+            # Add notes if present (not for Flatpak bundled components)
+            notes = guide.get("notes", "")
+            if notes:
+                notes_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+                notes_box.set_margin_top(6)
 
-            notes_box.append(notes_label)
-            content_box.append(notes_box)
+                notes_label = Gtk.Label()
+                notes_label.set_markup(f"<small><i>{GLib.markup_escape_text(notes)}</i></small>")
+                notes_label.set_wrap(True)
+                notes_label.set_xalign(0)
+                notes_label.add_css_class("dim-label")
+
+                notes_box.append(notes_label)
+                content_box.append(notes_box)
 
         # Wrap in ActionRow for proper styling
         guide_row = Adw.ActionRow()
@@ -260,6 +280,9 @@ class ComponentsView(Gtk.Box):
         guide_row.set_child(content_box)
 
         expander.add_row(guide_row)
+
+        # Store guide row reference so we can hide/show it based on installation status
+        self._guide_rows[component_id] = guide_row
 
     def _create_command_row(self, distro: str, command: str) -> Gtk.Box:
         """
@@ -327,6 +350,45 @@ class ComponentsView(Gtk.Box):
         # Visual feedback - change icon temporarily
         button.set_icon_name("emblem-ok-symbolic")
         GLib.timeout_add(1500, lambda: button.set_icon_name("edit-copy-symbolic"))
+
+    def _add_flatpak_bundled_message(self, content_box: Gtk.Box, component_id: str):
+        """
+        Add a message explaining that the component is bundled with Flatpak.
+
+        Args:
+            content_box: The content box to add the message to
+            component_id: Component identifier (clamscan or freshclam)
+        """
+        if component_id == "clamscan":
+            message = "clamscan is bundled with the Flatpak package. No installation is required."
+        else:  # freshclam
+            message = (
+                "freshclam is bundled with the Flatpak package. "
+                "No installation is required. The virus database is "
+                "automatically stored in the Flatpak sandbox."
+            )
+
+        info_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+        info_box.set_margin_start(6)
+        info_box.set_margin_end(6)
+
+        # Info icon
+        info_icon = Gtk.Image()
+        info_icon.set_from_icon_name("info-symbolic")
+        info_icon.set_icon_size(Gtk.IconSize.LARGE)
+        info_icon.add_css_class("dim-label")
+        info_box.append(info_icon)
+
+        # Message label
+        message_label = Gtk.Label()
+        message_label.set_markup(f"<small>{GLib.markup_escape_text(message)}</small>")
+        message_label.set_wrap(True)
+        message_label.set_xalign(0)
+        message_label.set_yalign(0.5)
+        message_label.add_css_class("dim-label")
+        info_box.append(message_label)
+
+        content_box.append(info_box)
 
     def _create_refresh_header_widget(self, group: Adw.PreferencesGroup):
         """
@@ -425,16 +487,43 @@ class ComponentsView(Gtk.Box):
         # Remove previous CSS classes
         clear_status_classes(status_icon)
 
+        # Check if component is bundled with Flatpak
+        is_flatpak_bundled = is_flatpak() and component_id in ("clamscan", "freshclam")
+
         if is_installed:
             status_icon.set_from_icon_name("emblem-ok-symbolic")
             set_status_class(status_icon, StatusLevel.SUCCESS)
-            status_label.set_text("Installed")
-            expander.set_subtitle(message or "Installed")
+            if is_flatpak_bundled:
+                status_label.set_text("Bundled")
+                expander.set_subtitle("Included with Flatpak")
+            else:
+                status_label.set_text("Installed")
+                expander.set_subtitle(message or "Installed")
+
+            # Hide installation guide and disable expander for installed components
+            guide_row = self._guide_rows.get(component_id)
+            if guide_row:
+                guide_row.set_visible(False)
+            expander.set_enable_expansion(False)
         else:
-            status_icon.set_from_icon_name("dialog-warning-symbolic")
-            set_status_class(status_icon, StatusLevel.WARNING)
-            status_label.set_text("Not installed")
-            expander.set_subtitle("Not installed - expand for setup instructions")
+            # In Flatpak, bundled components should always be available
+            if is_flatpak_bundled:
+                status_icon.set_from_icon_name("dialog-error-symbolic")
+                set_status_class(status_icon, StatusLevel.ERROR)
+                status_label.set_text("Unavailable")
+                expander.set_subtitle("Flatpak package issue - component should be bundled")
+                expander.set_enable_expansion(False)
+            else:
+                status_icon.set_from_icon_name("dialog-warning-symbolic")
+                set_status_class(status_icon, StatusLevel.WARNING)
+                status_label.set_text("Not installed")
+                expander.set_subtitle("Not installed - expand for setup instructions")
+
+                # Show installation guide and enable expander for not installed components
+                guide_row = self._guide_rows.get(component_id)
+                if guide_row:
+                    guide_row.set_visible(True)
+                expander.set_enable_expansion(True)
 
     def _update_daemon_status(self, component_id: str, status: DaemonStatus, message: str):
         """
@@ -455,22 +544,40 @@ class ComponentsView(Gtk.Box):
         # Remove previous CSS classes
         clear_status_classes(status_icon)
 
+        guide_row = self._guide_rows.get(component_id)
+
         if status == DaemonStatus.RUNNING:
             status_icon.set_from_icon_name("emblem-ok-symbolic")
             set_status_class(status_icon, StatusLevel.SUCCESS)
             status_label.set_text("Running")
             expander.set_subtitle("Daemon is running")
+            # Hide guide and disable expansion when daemon is running
+            if guide_row:
+                guide_row.set_visible(False)
+            expander.set_enable_expansion(False)
         elif status == DaemonStatus.STOPPED:
             status_icon.set_from_icon_name("media-playback-stop-symbolic")
             set_status_class(status_icon, StatusLevel.WARNING)
             status_label.set_text("Stopped")
             expander.set_subtitle("Daemon is installed but not running")
+            # Show guide and enable expansion for stopped daemon
+            if guide_row:
+                guide_row.set_visible(True)
+            expander.set_enable_expansion(True)
         elif status == DaemonStatus.NOT_INSTALLED:
             status_icon.set_from_icon_name("dialog-warning-symbolic")
             set_status_class(status_icon, StatusLevel.WARNING)
             status_label.set_text("Not installed")
             expander.set_subtitle("Not installed - expand for setup instructions")
+            # Show guide and enable expansion for not installed daemon
+            if guide_row:
+                guide_row.set_visible(True)
+            expander.set_enable_expansion(True)
         else:  # UNKNOWN
             status_icon.set_from_icon_name("dialog-question-symbolic")
             status_label.set_text("Unknown")
             expander.set_subtitle(message or "Unable to determine status")
+            # Show guide and enable expansion for unknown status
+            if guide_row:
+                guide_row.set_visible(True)
+            expander.set_enable_expansion(True)
