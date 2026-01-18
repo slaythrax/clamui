@@ -19,6 +19,9 @@ finish-args:
   # D-Bus permissions for notifications
   - --talk-name=org.freedesktop.Notifications
 
+  # Secret Service for secure API key storage (GNOME Keyring, KWallet)
+  - --talk-name=org.freedesktop.secrets
+
   # StatusNotifierItem (SNI) system tray protocol
   # Allows the tray service to register on D-Bus and communicate with
   # desktop environment tray watchers (KDE, Cinnamon, MATE, XFCE, Budgie)
